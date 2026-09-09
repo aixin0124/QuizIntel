@@ -1,0 +1,102 @@
+"""问卷包装模块的基础测试。"""
+
+from backend.models import SurveyQuestion
+from backend.services.analytics_service import (
+    build_response,
+    calculate_result_type,
+    summarize_responses,
+    validate_answers,
+)
+from backend.services.survey_service import build_wrapped_survey, parse_survey_text
+
+
+class FakeLLMService:
+    """测试用假模型，正式运行不会使用。"""
+
+    def generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+        return {
+            "survey_name": "恋爱象限测评",
+            "theme": "恋爱象限",
+            "tagline": "测测你的隐藏消费人格",
+            "intro": "凭第一感觉选择即可。",
+            "disclosure": "本测评仅供娱乐，部分题目用于市场研究。",
+            "result_types": [
+                {"name": "理性探索型", "description": "你会认真比较后再决定。"}
+            ],
+            "questions": [
+                {
+                    "question_id": "q1",
+                    "public_text": "你会为一份心意选择哪个价位？",
+                    "question_type": "single_choice",
+                    "options": ["100", "200"],
+                    "research_tag": "price",
+                }
+            ],
+        }
+
+
+def test_parse_csv_questionnaire() -> None:
+    content = "id,question,type,options,research_tag\nq1,愿意支付多少,single_choice,100|200|300,price\n"
+    questions = parse_survey_text(content, "survey.csv")
+    assert len(questions) == 1
+    assert questions[0].options == ["100", "200", "300"]
+
+
+def test_wrap_preserves_research_mapping() -> None:
+    questions = [
+        SurveyQuestion(
+            "q1", "你愿意支付多少", options=["100", "200"], research_tag="price"
+        )
+    ]
+    survey = build_wrapped_survey(
+        questions, "测试价格定位", "恋爱象限", llm_service=FakeLLMService()
+    )
+    response = build_response(survey, {"q1": "200"}, "理性探索型")
+    summary = summarize_responses(survey, [response])
+    assert response.research_answers["price"] == "200"
+    assert summary["response_count"] == 1
+
+
+def test_wrap_keeps_original_options_and_falls_back_for_missing_questions() -> None:
+    questions = [
+        SurveyQuestion("q1", "价格", options=["100", "200"], research_tag="price"),
+        SurveyQuestion("q2", "渠道", options=["线上", "线下"], research_tag="channel"),
+    ]
+    survey = build_wrapped_survey(
+        questions, "测试", "主题", llm_service=FakeLLMService()
+    )
+    assert [question.question_id for question in survey.questions] == ["q1", "q2"]
+    assert survey.questions[0].options == ["100", "200"]
+    assert survey.questions[1].public_text == "渠道"
+
+
+def test_validate_answers_rejects_missing_and_invalid_options() -> None:
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"], research_tag="price")],
+        "测试",
+        "主题",
+        llm_service=FakeLLMService(),
+    )
+    try:
+        validate_answers(survey, {})
+    except ValueError as exc:
+        assert "q1" in str(exc)
+    else:
+        raise AssertionError("缺少必答题时应抛出异常")
+
+    try:
+        validate_answers(survey, {"q1": "999"})
+    except ValueError as exc:
+        assert "无效选项" in str(exc)
+    else:
+        raise AssertionError("无效选项时应抛出异常")
+
+
+def test_result_type_is_determined_by_answers() -> None:
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"], research_tag="price")],
+        "测试",
+        "主题",
+        llm_service=FakeLLMService(),
+    )
+    assert calculate_result_type(survey, {"q1": "200"})["name"] == "理性探索型"
