@@ -42,8 +42,9 @@
 LLM_API_KEY=你的完整密钥
 LLM_BASE_URL=https://你的兼容接口地址
 LLM_MODEL=你的模型名称
-LLM_WIRE_API=responses
+LLM_WIRE_API=chat_completions
 LLM_REASONING_EFFORT=low
+LLM_MAX_OUTPUT_TOKENS=6000
 ```
 
 项目运行时始终调用真实大模型 API。`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 任意一项为空或仍为占位文字时，启动脚本会停止并提示配置错误。
@@ -53,47 +54,105 @@ LLM_REASONING_EFFORT=low
 - `LLM_WIRE_API=responses`
 - `LLM_WIRE_API=chat_completions`
 
+当前 `.env.example` 按 `https://www.blackaicoding.com` 这类兼容网关配置为 `chat_completions`。这类网关通常使用 `/v1/chat/completions`，项目会在填写根域名时自动补上 `/v1`。如果你使用的服务明确支持 Responses API，再改为 `LLM_WIRE_API=responses`。
+
 `.env` 已被 `.gitignore` 忽略，不要把真实密钥提交到 Git 仓库。如果密钥曾经出现在公开仓库或聊天记录中，应先轮换密钥再继续使用。
 
-## Windows 一键启动
+## Windows 启动方式
 
-双击项目根目录的 `start.bat`。
+### 第一次运行：准备环境
 
-脚本会自动：
+打开两个窗口前，先在 `cmd` 中执行一次下面的环境准备命令：
 
-1. 创建 `.venv` Python 虚拟环境。
-2. 安装 `backend/requirements.txt` 中的后端依赖。
-3. 使用 `frontend/package-lock.json` 安装前端依赖。
-4. 检查 `.env` 中的大模型配置。
-5. 启动后端和前端进程，并等待两个服务就绪。
+```bat
+cd /d "D:\desktop\毕业\趣测智研"
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+cd /d "D:\desktop\毕业\趣测智研\frontend"
+npm ci
+cd /d "D:\desktop\毕业\趣测智研"
+```
 
-启动后访问：
+如果项目根目录还没有 `.env`，先执行：
+
+```bat
+cd /d "D:\desktop\毕业\趣测智研"
+copy .env.example .env
+notepad .env
+```
+
+然后在 `.env` 中填写 `LLM_API_KEY`、`LLM_BASE_URL` 和 `LLM_MODEL`。
+
+### 日常启动
+
+每次启动需要打开两个 `cmd` 窗口。两个窗口都不要关闭，关闭窗口或按 `Ctrl+C` 就会停止对应服务。
+
+窗口一：启动后端，复制下面两行执行：
+
+```bat
+cd /d "D:\desktop\毕业\趣测智研"
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+窗口二：启动前端，复制下面两行执行：
+
+```bat
+cd /d "D:\desktop\毕业\趣测智研\frontend"
+npm run dev -- --host 127.0.0.1
+```
+
+启动成功后访问：
 
 - 用户端：http://localhost:5173
 - 后端健康检查：http://localhost:8000/api/health
 
-依赖需要重新安装时，在项目根目录执行：
+### 停止项目
 
-```powershell
-.\start.ps1 -Install
+优先在运行后端或前端的窗口中按 `Ctrl+C`。如果窗口已经关掉，但服务还在后台，可以在 `cmd` 中按端口查找进程：
+
+```bat
+netstat -ano | findstr ":8000"
+netstat -ano | findstr ":5173"
 ```
 
-## 手动启动
+最后一列是进程编号 PID。把下面的 `<进程编号>` 替换成实际 PID：
 
-后端：
+```bat
+taskkill /PID <进程编号> /T /F
+```
 
-```powershell
+例如：
+
+```bat
+taskkill /PID 12345 /T /F
+```
+
+再次执行下面两条命令确认端口已经释放：
+
+```bat
+netstat -ano | findstr ":8000"
+netstat -ano | findstr ":5173"
+```
+
+没有出现 `LISTENING` 就表示对应服务已经停止。
+
+### 重新安装依赖
+
+后端依赖：
+
+```bat
+cd /d "D:\desktop\毕业\趣测智研"
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-前端：
+前端依赖：
 
-```powershell
-cd frontend
+```bat
+cd /d "D:\desktop\毕业\趣测智研\frontend"
 npm ci
-npm run dev -- --host 127.0.0.1
 ```
+
+如果你的工作区中仍有 `start.bat` 和 `start.ps1`，只建议在明确需要自动启动、并且知道如何用端口命令停止后台进程时使用。
 
 ## 答辩操作流程
 

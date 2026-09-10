@@ -173,6 +173,10 @@ def get_public_survey(survey_id: int) -> dict[str, Any]:
     for question in payload.get("questions", []):
         question.pop("research_tag", None)
         question.pop("source_text", None)
+        question.pop("research_refs", None)
+        question.pop("option_scores", None)
+        question.pop("dimension_weights", None)
+        question.pop("rationale", None)
     return {"id": row["id"], "survey": payload}
 
 
@@ -202,7 +206,13 @@ def submit_response(request: ResponseRequest) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     result = calculate_result_type(survey, request.answers)
-    response = build_response(survey, request.answers, result["name"])
+    response = build_response(
+        survey,
+        request.answers,
+        result["name"],
+        result.get("dimension_scores", {}),
+        result.get("analysis", {}),
+    )
     response_id = database.save_response(response, request.survey_id)
     return {"id": response_id, "response": response.to_dict(), "result": result}
 

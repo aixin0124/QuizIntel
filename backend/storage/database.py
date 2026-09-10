@@ -116,6 +116,8 @@ class ResearchDatabase:
                     answers=payload["answers"],
                     result_type=payload["result_type"],
                     research_answers=payload["research_answers"],
+                    dimension_scores=payload.get("dimension_scores", {}),
+                    analysis=payload.get("analysis", {}),
                 )
             )
         return result

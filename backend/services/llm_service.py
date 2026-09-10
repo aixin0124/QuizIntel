@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 
@@ -55,6 +57,7 @@ class LLMService:
             {
                 "model": settings.llm_model,
                 "temperature": 0.75,
+                "max_tokens": settings.llm_max_output_tokens,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -77,7 +80,8 @@ class LLMService:
         headers = {"Content-Type": "application/json"}
         if settings.llm_api_key:
             headers["Authorization"] = f"Bearer {settings.llm_api_key}"
-        url = f"{settings.llm_base_url.rstrip('/')}/{path.lstrip('/')}"
+        url = _build_endpoint_url(settings.llm_base_url, path)
+        response: requests.Response | None = None
         try:
             response = requests.post(
                 url,
@@ -95,18 +99,64 @@ class LLMService:
                     timeout=settings.request_timeout,
                 )
             response.raise_for_status()
-        except requests.RequestException as exc:
+        except requests.Timeout as exc:
             raise RuntimeError(
-                f"模型接口请求失败：{settings.llm_base_url}。"
-                "请检查 API 地址、模型名称和密钥是否匹配。"
+                f"模型接口请求超时（{settings.request_timeout} 秒）：{url}。"
+                "可降低模型推理强度，或适当提高 REQUEST_TIMEOUT。"
+            ) from exc
+        except requests.RequestException as exc:
+            status = response.status_code if response is not None else "网络错误"
+            detail = _response_detail(response)
+            raise RuntimeError(
+                f"模型接口请求失败（{status}）：{detail or url}。"
+                "请检查 API 协议、模型名称和服务状态。"
             ) from exc
         try:
             data = response.json()
         except ValueError as exc:
-            raise RuntimeError("模型接口返回的内容不是合法 JSON") from exc
+            raise RuntimeError(
+                f"模型接口返回的内容不是合法 JSON（HTTP {response.status_code}）："
+                f"{_response_detail(response)}"
+            ) from exc
         if not isinstance(data, dict):
             raise RuntimeError("模型接口返回的 JSON 根节点必须是对象")
         return data
+
+
+def _build_endpoint_url(base_url: str, path: str) -> str:
+    """兼容根地址和已经包含 /v1 的 OpenAI 兼容服务。"""
+
+    base = base_url.rstrip("/")
+    normalized_path = path.strip("/")
+    base_path = urlparse(base).path.rstrip("/")
+    if normalized_path == "chat/completions" and not base_path.endswith("/v1"):
+        return f"{base}/v1/{normalized_path}"
+    return f"{base}/{normalized_path}"
+
+
+def _response_detail(response: requests.Response | None) -> str:
+    """提取简短的服务端错误，避免把网关整页 HTML 原样返回给用户。"""
+
+    if response is None:
+        return ""
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                message = error.get("message") or error.get("detail")
+                if message:
+                    return str(message)[:500]
+            for key in ("message", "detail"):
+                if payload.get(key):
+                    return str(payload[key])[:500]
+    except ValueError:
+        pass
+    title_match = re.search(r"<title>\s*(.*?)\s*</title>", response.text, re.I | re.S)
+    if title_match:
+        return " ".join(title_match.group(1).split())[:200]
+    text = " ".join(response.text.split())
+    return text[:500]
 
 
 def _extract_response_text(data: dict[str, Any]) -> str:
