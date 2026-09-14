@@ -52,7 +52,28 @@ function UserPortal() {
 
 function ResultPanel({ result }: { result: ResultPayload }) {
   const analysis = result.analysis;
-  return <div className="result"><p className="eyebrow">YOUR RESULT</p><h3>{result.name}</h3><p>{result.description}</p>{analysis && <><div className="result-columns"><div><strong>你的维度画像</strong>{analysis.dimension_breakdown.map((item) => <div className="dimension" key={item.key}><div><span>{item.name}</span><b>{item.signal}</b></div><div className="dimension-track"><span style={{ width: `${Math.round((item.score + 1) * 50)}%` }} /></div><small>{item.description}</small></div>)}</div><div><strong>这份结果为什么像你</strong><div className="evidence-list">{analysis.evidence.map((item, index) => <article key={`${item.question}-${index}`}><b>{item.answer}</b><span>{item.reason}</span><small>{item.question}</small></article>)}</div></div></div><div className="result-notes"><div><strong>你可能的优势</strong><ul>{analysis.strengths.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>可以留意</strong><ul>{analysis.watchouts.map((item) => <li key={item}>{item}</li>)}</ul></div></div><div className="result-advice"><strong>带走一条建议</strong><p>{analysis.advice}</p></div></>}</div>;
+  const strengths = analysis?.strengths?.length ? analysis.strengths : result.strengths || [];
+  const watchouts = analysis?.watchouts?.length ? analysis.watchouts : result.watchouts || [];
+  const advice = analysis?.advice || result.advice || "把这份结果当作自我观察的起点，结合具体场景判断是否符合你最近的状态。";
+  const summary = analysis?.summary || result.description;
+  const dimensions = analysis?.dimension_breakdown || [];
+  const highlightDimensions = dimensions.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 3);
+  const matchIndex = getResultMatchIndex(dimensions);
+  return <div className="result result-report"><div className="result-hero"><div><p className="result-kicker">YOUR RESULT</p><h3>你是{result.name}</h3><p>{summary}</p>{highlightDimensions.length > 0 && <div className="result-tags">{highlightDimensions.map((item) => <span key={item.key}>{item.name} · {item.signal}</span>)}</div>}</div><div className="result-score"><span>匹配指数</span><b>{matchIndex}</b><em>/ 100</em></div></div>{dimensions.length > 0 && <section className="result-section"><div className="result-section-title"><strong>维度画像</strong><span>根据你的选择换算出的倾向强弱</span></div><div className="dimension-grid">{dimensions.map((item) => { const percent = dimensionPercent(item.score); return <article className="dimension-card" key={item.key}><div className="dimension-card-head"><span>{item.name}</span><b>{item.signal}</b></div><div className="dimension-scale"><span style={{ width: `${percent}%` }} /></div><div className="dimension-card-foot"><small>{item.description}</small><em>{percent}%</em></div></article>; })}</div></section>}<section className="result-insights"><InsightCard title="你的突出特质" items={strengths} fallback="你的选择呈现出比较清晰的个人偏好。" /><InsightCard title="可以留意" items={watchouts} fallback="当结果落在中间区间时，可以结合真实场景继续观察。" /><div className="insight-card advice-card"><strong>带走一条建议</strong><p>{advice}</p></div></section></div>;
+}
+
+function InsightCard({ title, items, fallback }: { title: string; items: string[]; fallback: string }) {
+  return <div className="insight-card"><strong>{title}</strong><ul>{(items.length ? items : [fallback]).map((item) => <li key={item}>{item}</li>)}</ul></div>;
+}
+
+function dimensionPercent(score: number) {
+  return Math.max(0, Math.min(100, Math.round((score + 1) * 50)));
+}
+
+function getResultMatchIndex(dimensions: DimensionBreakdown[]) {
+  if (!dimensions.length) return 88;
+  const averageStrength = dimensions.reduce((sum, item) => sum + Math.abs(item.score), 0) / dimensions.length;
+  return Math.max(59, Math.min(98, Math.round(72 + averageStrength * 26)));
 }
 
 function AdminLogin({ onLogin }: { onLogin: (token: string) => void }) {

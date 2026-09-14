@@ -624,134 +624,216 @@ small {
 
 .result {
   margin-top: 20px;
-  border-left: 4px solid #32a287;
-  border-radius: 7px;
-  background: #effaf7;
-  padding: 20px;
+  overflow: hidden;
+  border: 1px solid #d8e1ed;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(31, 49, 70, 0.09);
 }
 
-.result h3 {
-  margin-bottom: 7px;
-  font-size: 24px;
+.result-report {
+  border-top: 4px solid #2467e8;
 }
 
-.result p:last-child {
-  margin-bottom: 0;
-  color: #4e665f;
+.result-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 24px;
+  align-items: center;
+  background: linear-gradient(120deg, #f4f8ff 0%, #ffffff 70%);
+  padding: 27px 28px 25px;
 }
 
-.result-columns {
+.result-kicker {
+  margin: 0 0 9px;
+  color: #2467e8;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+}
+
+.result-hero h3 {
+  margin: 0 0 8px;
+  color: #172033;
+  font-size: clamp(27px, 4vw, 38px);
+  line-height: 1.15;
+}
+
+.result-hero p {
+  max-width: 680px;
+  margin: 0;
+  color: #526277;
+  line-height: 1.8;
+}
+
+.result-score {
+  display: grid;
+  justify-items: center;
+  border-left: 1px solid #dfe7f1;
+  padding-left: 24px;
+}
+
+.result-score span {
+  color: #667382;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.result-score b {
+  margin-top: 1px;
+  color: #2467e8;
+  font-size: 48px;
+  line-height: 1;
+}
+
+.result-score em {
+  color: #8995a2;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 17px;
+}
+
+.result-tags span {
+  border: 1px solid #cbdcfb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #2467e8;
+  font-size: 12px;
+  padding: 6px 9px;
+}
+
+.result-section {
+  border-top: 1px solid #e0e6ee;
+  padding: 23px 28px 24px;
+}
+
+.result-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.result-section-title strong {
+  color: #18212b;
+  font-size: 17px;
+}
+
+.result-section-title span {
+  color: #8995a2;
+  font-size: 12px;
+}
+
+.dimension-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 24px;
-  margin-top: 22px;
-  border-top: 1px solid #cfe8df;
-  padding-top: 20px;
+  gap: 14px 22px;
+  margin-top: 17px;
 }
 
-.result-columns > div > strong,
-.result-notes strong,
-.result-advice strong {
-  display: block;
-  color: #285a4d;
-  font-size: 13px;
+.dimension-card {
+  min-width: 0;
 }
 
-.dimension {
-  margin-top: 14px;
-}
-
-.dimension > div:first-child {
+.dimension-card-head,
+.dimension-card-foot {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  color: #4e665f;
-  font-size: 13px;
 }
 
-.dimension b {
+.dimension-card-head {
+  color: #354559;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dimension-card-head b {
   color: #277865;
   font-size: 12px;
 }
 
-.dimension-track {
-  height: 7px;
+.dimension-scale {
+  height: 9px;
   overflow: hidden;
-  margin: 7px 0 5px;
+  margin-top: 8px;
   border-radius: 999px;
-  background: #dceee8;
+  background: #e8edf3;
 }
 
-.dimension-track span {
+.dimension-scale span {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: #32a287;
+  background: linear-gradient(90deg, #78bbaa, #32a287);
 }
 
-.dimension small {
-  color: #6b817a;
+.dimension-card-foot {
+  margin-top: 6px;
+}
+
+.dimension-card-foot small {
+  min-width: 0;
+  color: #788594;
   line-height: 1.5;
 }
 
-.evidence-list {
-  display: grid;
-  gap: 9px;
-  margin-top: 12px;
+.dimension-card-foot em {
+  flex: 0 0 auto;
+  color: #32a287;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
 }
 
-.evidence-list article {
+.result-insights {
   display: grid;
-  gap: 3px;
-  border-left: 3px solid #8bcab9;
-  background: rgba(255, 255, 255, 0.55);
-  padding: 9px 11px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid #e0e6ee;
+  background: #fbfcfe;
+  padding: 20px 28px 26px;
 }
 
-.evidence-list article b {
+.insight-card {
+  min-width: 0;
+  border: 1px solid #e0e6ee;
+  border-radius: 7px;
+  background: #ffffff;
+  padding: 15px;
+}
+
+.insight-card strong {
+  display: block;
   color: #285a4d;
   font-size: 13px;
 }
 
-.evidence-list article span {
+.insight-card ul {
+  margin: 9px 0 0;
+  padding-left: 17px;
   color: #4e665f;
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 1.75;
 }
 
-.evidence-list article small {
-  color: #789087;
-  line-height: 1.45;
-}
-
-.result-notes {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 22px;
-  border-top: 1px solid #cfe8df;
-  padding-top: 18px;
-}
-
-.result-notes ul {
-  margin: 8px 0 0;
-  padding-left: 18px;
+.insight-card p {
+  margin: 9px 0 0;
   color: #4e665f;
   font-size: 13px;
   line-height: 1.7;
 }
 
-.result-advice {
-  margin-top: 18px;
-  border: 1px solid #b8ded2;
-  background: #e8f7f2;
-  padding: 13px;
-}
-
-.result-advice p {
-  margin: 5px 0 0;
-  color: #4e665f;
-  font-size: 13px;
+.advice-card {
+  border-color: #b8ded2;
+  background: #effaf7;
 }
 
 .generation-overlay {
@@ -1272,8 +1354,7 @@ small {
   .admin-shell,
   .workspace.two,
   .dashboard-grid,
-  .result-columns,
-  .result-notes {
+  .result-insights {
     grid-template-columns: 1fr;
   }
 
@@ -1320,6 +1401,28 @@ small {
     grid-column: 2;
     border-top: 1px dashed #dfe5ec;
     padding-top: 15px;
+  }
+
+  .result-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .result-score {
+    justify-items: start;
+    border-top: 1px solid #dfe7f1;
+    border-left: 0;
+    padding-top: 17px;
+    padding-left: 0;
+  }
+
+  .dimension-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .result-section-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
   }
 }
 
@@ -1374,5 +1477,16 @@ small {
 
   .required-toggle {
     margin-top: 12px;
+  }
+
+  .result-hero,
+  .result-section,
+  .result-insights {
+    padding-left: 19px;
+    padding-right: 19px;
+  }
+
+  .result-hero h3 {
+    font-size: 28px;
   }
 }
