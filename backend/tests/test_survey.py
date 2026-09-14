@@ -57,6 +57,17 @@ def test_wrap_preserves_research_mapping() -> None:
     assert summary["response_count"] == 1
 
 
+def test_wrap_title_follows_theme_hint() -> None:
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"])],
+        "测试",
+        "周末旅行决策风格",
+        llm_service=FakeLLMService(),
+    )
+    assert survey.theme == "周末旅行决策风格"
+    assert survey.survey_name == "周末旅行决策风格测评"
+
+
 def test_wrap_keeps_original_options_and_falls_back_for_missing_questions() -> None:
     questions = [
         SurveyQuestion("q1", "价格", options=["100", "200"], research_tag="price"),

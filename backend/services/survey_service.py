@@ -92,7 +92,7 @@ def build_wrapped_survey(
                 indent=2,
             ),
         )
-    wrapped = _normalize_wrapped_survey(raw, questions, brand_goal)
+    wrapped = _normalize_wrapped_survey(raw, questions, brand_goal, theme_hint)
     wrapped.source = "llm"
     return wrapped
 
@@ -226,6 +226,8 @@ def _system_prompt() -> str:
         "重新设计一份有场景、有选择取舍、有明确区分逻辑的短测评。"
         "导入的原始题目和选项只是研究参考，可以被合并、拆分、舍弃或转化，"
         "生成题目数量不需要与原题一致。"
+        "survey_name 和 theme 必须围绕用户提供的 theme_hint 生成，不能改成无关主题；"
+        "survey_name 应直接体现 theme_hint，优先使用“主题 + 测评”的清晰标题。"
         "\n\n"
         "通用设计原则："
         "\n1. 主题优先：先定义主题真正要测的行为维度，再写题目。"
@@ -267,6 +269,7 @@ def _blueprint_system_prompt() -> str:
     return (
         "你是专业的主题测评策划师。请先为用户指定主题建立一个通用、非临床的分析蓝图，"
         "不要复述原始问卷。根据主题选择 3 至 5 个真正相关的行为维度，并生成 4 个互相区分的结果画像。"
+        "survey_name 和 theme 必须与 theme_hint 保持一致，survey_name 应直接使用 theme_hint 作为标题核心。"
         "原始题目只作为市场研究参考。只输出合法 JSON。"
         "dimensions 的每个字段保持简短；result_types 的 description 不超过 80 字，"
         "strengths 和 watchouts 各 1 至 2 条，advice 不超过 50 字。"
@@ -388,14 +391,17 @@ def _question_schema() -> dict[str, Any]:
 
 
 def _normalize_wrapped_survey(
-    raw: dict[str, Any], originals: list[SurveyQuestion], brand_goal: str
+    raw: dict[str, Any],
+    originals: list[SurveyQuestion],
+    brand_goal: str,
+    theme_hint: str,
 ) -> WrappedSurvey:
     original_map = {question.question_id: question for question in originals}
     dimensions = _normalize_dimensions(raw.get("dimensions", []))
 
     # 没有新评分协议时兼容历史数据；新生成的问卷走主题驱动的互动题流程。
     if not dimensions:
-        return _normalize_legacy_wrapped_survey(raw, originals, brand_goal)
+        return _normalize_legacy_wrapped_survey(raw, originals, brand_goal, theme_hint)
 
     wrapped_questions: list[WrappedQuestion] = []
     used_ids: set[str] = set()
@@ -459,8 +465,8 @@ def _normalize_wrapped_survey(
         raise ValueError("模型没有生成可用的互动题目")
 
     return WrappedSurvey(
-        survey_name=str(raw.get("survey_name") or "趣味测评"),
-        theme=str(raw.get("theme") or "你的隐藏属性"),
+        survey_name=_build_survey_title(theme_hint),
+        theme=_clean_theme_hint(theme_hint),
         tagline=str(raw.get("tagline") or "花一分钟，看看你是哪一型"),
         intro=str(raw.get("intro") or "根据你的选择生成一个轻量趣味结果。"),
         disclosure=str(
@@ -481,7 +487,10 @@ def _normalize_wrapped_survey(
 
 
 def _normalize_legacy_wrapped_survey(
-    raw: dict[str, Any], originals: list[SurveyQuestion], brand_goal: str
+    raw: dict[str, Any],
+    originals: list[SurveyQuestion],
+    brand_goal: str,
+    theme_hint: str,
 ) -> WrappedSurvey:
     """兼容 v1 数据，避免历史问卷因新增评分字段无法读取。"""
 
@@ -507,8 +516,8 @@ def _normalize_legacy_wrapped_survey(
             )
         )
     return WrappedSurvey(
-        survey_name=str(raw.get("survey_name") or "趣味测评"),
-        theme=str(raw.get("theme") or "你的隐藏属性"),
+        survey_name=_build_survey_title(theme_hint),
+        theme=_clean_theme_hint(theme_hint),
         tagline=str(raw.get("tagline") or "花一分钟，看看你是哪一型"),
         intro=str(raw.get("intro") or "根据你的选择生成一个轻量趣味结果。"),
         disclosure=str(
@@ -522,6 +531,23 @@ def _normalize_legacy_wrapped_survey(
         source="llm",
         analysis_method="历史版本按结果类型兼容计算，建议重新生成以启用主题人格分析。",
     )
+
+
+def _clean_theme_hint(theme_hint: str) -> str:
+    """清理主题输入，作为标题和主题展示的统一来源。"""
+
+    return " ".join(theme_hint.split()).strip("。.!！?？")
+
+
+def _build_survey_title(theme_hint: str) -> str:
+    """用用户主题生成稳定标题，避免模型标题偏离包装方向。"""
+
+    theme = _clean_theme_hint(theme_hint)
+    if not theme:
+        return "趣味测评"
+    if theme.endswith(("测评", "问卷", "测试")):
+        return theme
+    return f"{theme}测评"
 
 
 def _string_list(value: Any) -> list[str]:
