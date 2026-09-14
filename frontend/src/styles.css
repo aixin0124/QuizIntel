@@ -221,6 +221,62 @@ p {
   gap: 22px;
 }
 
+.import-panel {
+  min-width: 0;
+}
+
+.import-panel .section-heading {
+  align-items: flex-start;
+}
+
+.import-panel .section-heading p {
+  margin: 6px 0 0;
+  color: #8995a2;
+  font-size: 12px;
+}
+
+.url-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: stretch;
+}
+
+.url-input-row input {
+  min-width: 0;
+}
+
+.import-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.field-hint {
+  margin: 8px 0 0;
+  color: #8995a2;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.import-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0 2px;
+  color: #9aa7b5;
+  font-size: 11px;
+}
+
+.import-divider::before,
+.import-divider::after {
+  flex: 1;
+  height: 1px;
+  background: #e1e6ed;
+  content: "";
+}
+
 .panel,
 .testSurface {
   padding: 25px;
@@ -1473,6 +1529,14 @@ small {
   .editor-fields {
     grid-template-columns: 1fr;
     gap: 0;
+  }
+
+  .url-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .import-action {
+    justify-content: center;
   }
 
   .required-toggle {

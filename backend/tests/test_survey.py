@@ -7,7 +7,12 @@ from backend.services.analytics_service import (
     summarize_responses,
     validate_answers,
 )
-from backend.services.survey_service import build_wrapped_survey, parse_survey_text
+from backend.services.survey_service import (
+    _validate_wjx_url,
+    build_wrapped_survey,
+    parse_survey_text,
+    parse_wjx_html,
+)
 
 
 class FakeLLMService:
@@ -40,6 +45,67 @@ def test_parse_csv_questionnaire() -> None:
     questions = parse_survey_text(content, "survey.csv")
     assert len(questions) == 1
     assert questions[0].options == ["100", "200", "300"]
+
+
+def test_parse_wjx_html_questionnaire() -> None:
+    content = """
+    <html>
+      <head><title>大学生消费调查</title></head>
+      <body>
+        <div id="divQuestion">
+          <div class="field ui-field-contain" topic="1" id="div1" req="1" type="3">
+            <div class="field-label"><span>*</span><div class="topicnumber">1.</div><div class="topichtml">你的性别</div></div>
+            <div class="ui-radio"><input type="radio" name="q1"><div class="label" dit="%e7%94%b7">男</div></div>
+            <div class="ui-radio"><input type="radio" name="q1"><div class="label" dit="%e5%a5%b3">女</div></div>
+          </div>
+          <div class="field ui-field-contain" topic="2" id="div2" req="0" type="4">
+            <div class="field-label"><div class="topicnumber">2.</div><div class="topichtml">每月消费多用在哪些方面</div></div>
+            <div class="ui-checkbox"><input type="checkbox" name="q2"><div class="label">伙食</div></div>
+            <div class="ui-checkbox"><input type="checkbox" name="q2"><div class="label">交通</div></div>
+          </div>
+          <div class="field ui-field-contain" topic="3" id="div3" req="1" type="1">
+            <div class="field-label"><div class="topicnumber">3.</div><div class="topichtml">请填写学校名称</div></div>
+            <input type="text" name="q3">
+          </div>
+        </div>
+      </body>
+    </html>
+    """
+    title, questions = parse_wjx_html(content, "https://v.wjx.cn/vm/example.aspx")
+    assert title == "大学生消费调查"
+    assert [question.question_id for question in questions] == ["q1", "q2", "q3"]
+    assert questions[0].options == ["男", "女"]
+    assert questions[1].question_type == "multiple_choice"
+    assert questions[1].required is False
+    assert questions[2].question_type == "text"
+
+
+def test_parse_wjx_rejects_non_wjx_url() -> None:
+    try:
+        _validate_wjx_url("https://example.com/survey")
+    except ValueError as exc:
+        assert "问卷星域名" in str(exc)
+    else:
+        raise AssertionError("非问卷星链接应被拒绝")
+
+
+def test_parse_wjx_unavailable_page_has_clear_error() -> None:
+    content = """
+    <html>
+      <body>
+        <div id="divWorkError">
+          <h2>提示信息</h2>
+          <p id="divInfo">问卷已停止填写</p>
+        </div>
+      </body>
+    </html>
+    """
+    try:
+        parse_wjx_html(content, "https://v.wjx.cn/wjx/checkstatus.aspx")
+    except ValueError as exc:
+        assert "不可访问" in str(exc)
+    else:
+        raise AssertionError("问卷星不可用页面应给出明确提示")
 
 
 def test_wrap_preserves_research_mapping() -> None:

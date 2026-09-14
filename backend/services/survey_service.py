@@ -8,10 +8,163 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
+from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import unquote, urlparse
+
+import requests
 
 from ..models import SurveyQuestion, WrappedQuestion, WrappedSurvey
 from .llm_service import LLMService
+
+
+class _WJXQuestionHTMLParser(HTMLParser):
+    """提取问卷星公开页面中的标题、题干和选项。"""
+
+    _void_tags = {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.depth = 0
+        self.title_depth: int | None = None
+        self.title_parts: list[str] = []
+        self.question_capture_depth: int | None = None
+        self.question_parts: list[str] = []
+        self.option_capture_depth: int | None = None
+        self.option_parts: list[str] = []
+        self.option_fallback = ""
+        self.current: dict[str, Any] | None = None
+        self.field_depth: int | None = None
+        self.fields: list[dict[str, Any]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = {key.lower(): value or "" for key, value in attrs}
+        classes = set(attributes.get("class", "").split())
+        is_void = tag.lower() in self._void_tags
+        if tag.lower() == "br":
+            if self.question_capture_depth is not None:
+                self.question_parts.append(" ")
+            if self.option_capture_depth is not None:
+                self.option_parts.append(" ")
+
+        if (
+            self.current is None
+            and tag.lower() == "div"
+            and "field" in classes
+            and attributes.get("topic")
+        ):
+            self.current = {
+                "question_id": f"q{attributes['topic'].strip()}",
+                "topic": attributes["topic"].strip(),
+                "required": _parse_bool(attributes.get("req", "1")),
+                "field_type": attributes.get("type", "").strip(),
+                "question_parts": [],
+                "options": [],
+                "option_fallbacks": [],
+                "input_types": [],
+                "has_textarea": False,
+                "has_select": False,
+            }
+            self.field_depth = self.depth + 1
+
+        if self.current is not None:
+            if tag.lower() == "input":
+                input_type = attributes.get("type", "").lower().strip()
+                if input_type != "hidden":
+                    self.current["input_types"].append(input_type)
+            elif tag.lower() == "textarea":
+                self.current["has_textarea"] = True
+            elif tag.lower() == "select":
+                self.current["has_select"] = True
+
+        if tag.lower() == "title":
+            self.title_depth = self.depth + 1
+            self.title_parts = []
+        elif tag.lower() == "h1" and (
+            attributes.get("id") == "htitle" or "htitle" in classes
+        ):
+            self.title_depth = self.depth + 1
+            self.title_parts = []
+        elif self.current is not None and "topichtml" in classes:
+            self.question_capture_depth = self.depth + 1
+            self.question_parts = []
+        elif (
+            self.current is not None
+            and "label" in classes
+            and "field-label" not in classes
+        ):
+            self.option_capture_depth = self.depth + 1
+            self.option_parts = []
+            self.option_fallback = unquote(attributes.get("dit", ""))
+
+        if not is_void:
+            self.depth += 1
+
+    def handle_startendtag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() in self._void_tags:
+            return
+
+        if self.option_capture_depth == self.depth:
+            option = _clean_wjx_text("".join(self.option_parts))
+            if not option:
+                option = _clean_wjx_text(self.option_fallback)
+            if option and self.current is not None:
+                self.current["options"].append(option)
+            self.option_capture_depth = None
+            self.option_parts = []
+            self.option_fallback = ""
+
+        if self.question_capture_depth == self.depth:
+            if self.current is not None:
+                self.current["question_parts"] = list(self.question_parts)
+            self.question_capture_depth = None
+            self.question_parts = []
+
+        if self.title_depth == self.depth:
+            self.title_depth = None
+
+        if self.field_depth == self.depth and self.current is not None:
+            self.fields.append(self.current)
+            self.current = None
+            self.field_depth = None
+
+        self.depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.title_depth is not None and self.depth >= self.title_depth:
+            self.title_parts.append(data)
+        if (
+            self.question_capture_depth is not None
+            and self.depth >= self.question_capture_depth
+        ):
+            self.question_parts.append(data)
+        if self.option_capture_depth is not None and self.depth >= self.option_capture_depth:
+            self.option_parts.append(data)
+
+    @property
+    def title(self) -> str:
+        return _clean_wjx_text("".join(self.title_parts))
 
 
 def parse_survey_text(content: str, file_name: str = "") -> list[SurveyQuestion]:
@@ -64,6 +217,149 @@ def parse_survey_text(content: str, file_name: str = "") -> list[SurveyQuestion]
             )
         )
     return _validate_questions(questions)
+
+
+def parse_wjx_url(url: str) -> tuple[str, list[SurveyQuestion]]:
+    """读取问卷星公开链接，并转换为统一的原始题目结构。"""
+
+    normalized_url = _validate_wjx_url(url)
+    try:
+        response = requests.get(
+            normalized_url,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/140.0 Safari/537.36"
+                ),
+            },
+            timeout=20,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+    except requests.Timeout as exc:
+        raise ValueError("问卷星页面请求超时，请稍后重试。") from exc
+    except requests.RequestException as exc:
+        raise ValueError(f"问卷星页面请求失败：{exc}") from exc
+
+    final_url = str(response.url or normalized_url)
+    _validate_wjx_url(final_url)
+    if "checkstatus.aspx" in final_url.lower():
+        raise ValueError(
+            "问卷星返回了校验或不可用页面，可能已停止收集、需要登录或限制访问。"
+            "请确认链接可以直接公开填写，或改用问卷星导出的文件。"
+        )
+    if len(response.content) > 8 * 1024 * 1024:
+        raise ValueError("问卷星页面超过 8 MB，暂不支持解析。")
+
+    encoding = response.encoding or "utf-8"
+    content = response.content.decode(encoding, errors="replace")
+    return parse_wjx_html(content, final_url)
+
+
+def parse_wjx_html(content: str, source_url: str = "") -> tuple[str, list[SurveyQuestion]]:
+    """解析问卷星页面 HTML，支持常见单选、多选和填空题。"""
+
+    parser = _WJXQuestionHTMLParser()
+    try:
+        parser.feed(content)
+        parser.close()
+    except Exception as exc:
+        raise ValueError("问卷星页面结构无法解析。") from exc
+
+    questions: list[SurveyQuestion] = []
+    for index, field in enumerate(parser.fields, 1):
+        question_text = _clean_wjx_text("".join(field["question_parts"]))
+        if not question_text:
+            continue
+        options = _unique_strings(field["options"])
+        question_type = _wjx_question_type(field)
+        question_id = str(field.get("question_id") or f"q{index}")
+        questions.append(
+            SurveyQuestion(
+                question_id=question_id,
+                text=question_text,
+                question_type=question_type,
+                options=options if question_type != "text" else [],
+                research_tag="",
+                required=bool(field.get("required", True)),
+            )
+        )
+
+    if not questions:
+        if _looks_like_wjx_unavailable_page(content):
+            raise ValueError(
+                "问卷星页面当前不可访问，可能已停止收集、需要校验或仅限特定用户访问。"
+                "请确认链接可以公开填写，或改用问卷星导出的文件。"
+            )
+        suffix = f"（{source_url}）" if source_url else ""
+        raise ValueError(f"没有识别到可导入的题目{suffix}。")
+
+    title = parser.title or "问卷星问卷"
+    return title, _validate_questions(questions)
+
+
+def _validate_wjx_url(value: str) -> str:
+    """限制链接只能访问问卷星域名，避免把解析接口变成任意地址抓取器。"""
+
+    parsed = urlparse(value.strip())
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError("请输入有效的问卷星 http(s) 链接。")
+    if parsed.username or parsed.password:
+        raise ValueError("问卷星链接不能包含账号或密码。")
+    if not (hostname == "wjx.cn" or hostname.endswith(".wjx.cn")):
+        raise ValueError("目前只支持问卷星域名的链接，例如 v.wjx.cn/vm/xxx.aspx。")
+    return parsed.geturl()
+
+
+def _wjx_question_type(field: dict[str, Any]) -> str:
+    """根据问卷星字段中的控件和题型标记判断题型。"""
+
+    input_types = set(field.get("input_types", []))
+    if "checkbox" in input_types or field.get("field_type") == "4":
+        return "multiple_choice"
+    if (
+        field.get("has_textarea")
+        or input_types.intersection({"text", "number", "email", "tel", "url", "date"})
+    ):
+        return "text"
+    if field.get("field_type") in {"1", "2"} and not field.get("options"):
+        return "text"
+    return "single_choice"
+
+
+def _clean_wjx_text(value: str) -> str:
+    """清理页面换行和不可见空格，保留题目原始语义。"""
+
+    return re.sub(r"\s+", " ", value.replace("\xa0", " ")).strip()
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    """按出现顺序去重页面中重复渲染的选项。"""
+
+    return list(dict.fromkeys(value for value in values if value))
+
+
+def _looks_like_wjx_unavailable_page(content: str) -> bool:
+    """识别问卷星的停止、校验等提示页。"""
+
+    lowered = content.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "checkstatus.aspx",
+            "问卷已停止",
+            "问卷已暂停",
+            "问卷不存在",
+            "当前问卷",
+            "停止收集",
+            "停止填写",
+            "divinfo",
+        )
+    )
 
 
 def build_wrapped_survey(

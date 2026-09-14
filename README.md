@@ -189,6 +189,7 @@ Invoke-WebRequest http://127.0.0.1:8000/api/health
 ## 主要功能
 
 - 导入 CSV 或 JSON 问卷
+- 粘贴问卷星公开转发链接导入题目
 - 识别题目、题型、选项和研究标签
 - 调用 OpenAI 兼容大模型生成互动包装
 - 通过 `question_id` 保留原始题目和互动题面的映射

@@ -20,6 +20,7 @@ from .services.analytics_service import (
 )
 from .services.survey_service import (
     build_wrapped_survey,
+    parse_wjx_url,
     parse_survey_text,
     wrapped_survey_from_dict,
 )
@@ -45,6 +46,12 @@ class ParseRequest(BaseModel):
 
     content: str
     file_name: str = "survey.json"
+
+
+class WJXParseRequest(BaseModel):
+    """问卷星链接导入请求。"""
+
+    url: str
 
 
 class WrapRequest(BaseModel):
@@ -108,6 +115,25 @@ def parse_survey(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"问卷解析失败：{exc}") from exc
     return {"questions": [question.to_dict() for question in questions]}
+
+
+@app.post("/api/surveys/parse-wjx")
+def parse_wjx_survey(
+    request: WJXParseRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """读取问卷星公开转发链接并返回可编辑题目。"""
+
+    require_admin(x_admin_token)
+    try:
+        title, questions = parse_wjx_url(request.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"问卷星导入失败：{exc}") from exc
+    return {
+        "title": title,
+        "source_url": request.url.strip(),
+        "questions": [question.to_dict() for question in questions],
+    }
 
 
 @app.post("/api/surveys/upload")
