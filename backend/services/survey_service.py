@@ -19,6 +19,10 @@ from ..models import SurveyQuestion, WrappedQuestion, WrappedSurvey
 from .llm_service import LLMService
 
 
+# 人格和风格测评需要多个题目交叉验证，避免单题对结果影响过大。
+MIN_GENERATED_QUESTIONS = 12
+
+
 class _WJXQuestionHTMLParser(HTMLParser):
     """提取问卷星公开页面中的标题、题干和选项。"""
 
@@ -438,23 +442,38 @@ def _generate_staged_survey(
     if not dimensions:
         raise ValueError("模型没有生成有效的主题分析维度")
 
+    question_prompt = json.dumps(
+        {
+            "brand_goal": brand_goal,
+            "theme_hint": theme_hint,
+            "dimensions": dimensions,
+            "research_material": source_material,
+            "required_output": _question_schema(),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
     try:
         question_result = service.generate_json(
             _question_system_prompt(),
-            json.dumps(
-                {
-                    "brand_goal": brand_goal,
-                    "theme_hint": theme_hint,
-                    "dimensions": dimensions,
-                    "research_material": source_material,
-                    "required_output": _question_schema(),
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
+            question_prompt,
         )
     except RuntimeError as exc:
         raise RuntimeError(f"互动题生成阶段失败：{exc}") from exc
+
+    # 部分模型会忽略题量要求，返回过短结果；补发一次明确的纠偏请求。
+    raw_questions = question_result.get("questions", [])
+    if not isinstance(raw_questions, list) or len(raw_questions) < MIN_GENERATED_QUESTIONS:
+        try:
+            question_result = service.generate_json(
+                _question_system_prompt()
+                + f"上一版题目数量不足。必须重新生成至少 {MIN_GENERATED_QUESTIONS} 道题，"
+                "不要复用上一版的题目数量。",
+                question_prompt,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"互动题补生成阶段失败：{exc}") from exc
+
     return {
         "survey_name": blueprint.get("survey_name"),
         "theme": blueprint.get("theme"),
@@ -532,7 +551,7 @@ def _system_prompt() -> str:
         "\n2. 题目要像真实场景中的选择题，而不是传统量表。优先使用聊天、"
         "约会、购物、旅行、工作协作、突发状况、礼物、冲突、边界和取舍等具体情境，"
         "让不同选项体现不同倾向，避免每道题都明显对应某个维度。"
-        "\n3. 生成一份完整的短测评，通常控制在 8 至 10 道题，"
+        f"\n3. 生成一份完整的短测评，必须生成恰好 {MIN_GENERATED_QUESTIONS} 道题，"
         "题目数量由主题复杂度和分析可靠性决定，不需要与导入题目数量一致；"
         "单选为主，可少量多选，避免开放文本题，"
         "因为文本无法稳定评分。每道题 3 至 4 个有画面的选项。"
@@ -578,7 +597,8 @@ def _blueprint_system_prompt() -> str:
 
 def _question_system_prompt() -> str:
     return (
-        "你是专业的互动测评题目设计师。围绕给定主题和分析维度，生成 6 至 8 道有画面的场景选择题。"
+        "你是专业的互动测评题目设计师。围绕给定主题和分析维度，生成恰好 12 道有画面的场景选择题。"
+        "12 道题是最低要求，不得只生成 6 至 8 道；每个分析维度至少由 2 道题交叉测量。"
         "题目应体现选择取舍，不能只是改写原题；单选为主，可少量多选，每题 3 至 4 个选项。"
         "原始题目只用于研究参考，互动题可以合并、转化或不映射。"
         "每个选项都必须有 -1 到 1 的维度评分，确保后端可以复算结果；rationale 不超过 40 字。"
@@ -608,6 +628,7 @@ def _output_schema() -> dict[str, Any]:
                 "low_pole": "低分表现",
             }
         ],
+        "question_count": MIN_GENERATED_QUESTIONS,
         "result_types": [
             {
                 "name": "类型名称",
@@ -669,6 +690,7 @@ def _blueprint_schema() -> dict[str, Any]:
 
 def _question_schema() -> dict[str, Any]:
     return {
+        "question_count": MIN_GENERATED_QUESTIONS,
         "questions": [
             {
                 "question_id": "互动题 ID，例如 iq1",
@@ -757,8 +779,11 @@ def _normalize_wrapped_survey(
             )
         )
 
-    if not wrapped_questions:
-        raise ValueError("模型没有生成可用的互动题目")
+    if len(wrapped_questions) < MIN_GENERATED_QUESTIONS:
+        raise ValueError(
+            f"模型生成的互动题目不足 {MIN_GENERATED_QUESTIONS} 道，"
+            "请重试生成，以保证人格维度有足够的交叉题目。"
+        )
 
     return WrappedSurvey(
         survey_name=_build_survey_title(theme_hint),

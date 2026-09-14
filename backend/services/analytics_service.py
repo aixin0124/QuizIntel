@@ -106,10 +106,18 @@ def calculate_dimension_scores(
             continue
 
         # 多选题取平均，避免多选数量本身把分数无意义地放大。
+        configured_dimensions: set[str] = set()
+        for item in option_contributions:
+            configured_dimensions.update(item)
+
         for key in dimension_keys:
+            if key not in configured_dimensions:
+                continue
             score = sum(item.get(key, 0.0) for item in option_contributions)
             score /= len(option_contributions)
             question_weight = question.dimension_weights.get(key, 1.0)
+            if question_weight == 0:
+                continue
             totals[key] += score * question_weight
             weights[key] += abs(question_weight)
 

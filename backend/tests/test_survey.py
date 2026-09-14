@@ -4,10 +4,13 @@ from backend.models import SurveyQuestion
 from backend.services.analytics_service import (
     build_response,
     calculate_result_type,
+    calculate_dimension_scores,
     summarize_responses,
     validate_answers,
 )
 from backend.services.survey_service import (
+    MIN_GENERATED_QUESTIONS,
+    _normalize_wrapped_survey,
     _validate_wjx_url,
     build_wrapped_survey,
     parse_survey_text,
@@ -177,3 +180,53 @@ def test_result_type_is_determined_by_answers() -> None:
         llm_service=FakeLLMService(),
     )
     assert calculate_result_type(survey, {"q1": "200"})["name"] == "理性探索型"
+
+
+def test_generated_survey_requires_enough_questions() -> None:
+    raw = {
+        "dimensions": [
+            {
+                "key": "initiative",
+                "name": "主动性",
+                "description": "面对机会时的行动倾向",
+            }
+        ],
+        "questions": [
+            {
+                "question_id": "iq1",
+                "public_text": "你会怎么做？",
+                "question_type": "single_choice",
+                "options": ["先观察", "马上行动"],
+                "option_scores": {
+                    "先观察": {"initiative": -0.5},
+                    "马上行动": {"initiative": 0.5},
+                },
+            }
+        ],
+    }
+
+    try:
+        _normalize_wrapped_survey(raw, [], "测试", "行动风格")
+    except ValueError as exc:
+        assert str(MIN_GENERATED_QUESTIONS) in str(exc)
+    else:
+        raise AssertionError("互动题少于最低数量时应拒绝保存")
+
+
+def test_dimension_scores_ignore_unconfigured_questions() -> None:
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"])],
+        "测试",
+        "主题",
+        llm_service=FakeLLMService(),
+    )
+    survey.dimensions = [
+        {"key": "initiative", "name": "主动性"},
+        {"key": "prudence", "name": "谨慎度"},
+    ]
+    survey.questions[0].option_scores = {"200": {"initiative": 1.0}}
+    survey.questions[0].dimension_weights = {"initiative": 1.0, "prudence": 1.0}
+
+    scores = calculate_dimension_scores(survey, {"q1": "200"})
+
+    assert scores == {"initiative": 1.0, "prudence": 0.0}
