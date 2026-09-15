@@ -1154,6 +1154,7 @@ small {
 }
 
 .sidebar-survey {
+  position: relative;
   display: grid;
   width: 100%;
   gap: 4px;
@@ -1161,23 +1162,36 @@ small {
   border-color: transparent;
   background: transparent;
   padding: 10px 12px;
+  padding-right: 42px;
   text-align: left;
 }
 
-.sidebar-survey-row {
-  display: flex;
-  align-items: stretch;
-  gap: 3px;
-  margin-bottom: 4px;
+.sidebar-delete-action {
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #9aa7b5;
+  transform: translateY(-50%);
 }
 
-.sidebar-survey-row .sidebar-survey {
-  flex: 1;
-  margin-bottom: 0;
+.sidebar-delete-action:hover {
+  border-color: #e7b8c0;
+  background: #fff4f5;
+  color: #b33b4d;
+}
+
+.sidebar-delete-action:focus-visible {
+  outline: 2px solid #2467e8;
+  outline-offset: 1px;
 }
 
 .sidebar-trash {
-  flex: 0 0 34px;
   width: 34px;
   height: auto;
   min-height: 40px;
@@ -1196,7 +1210,7 @@ small {
   font-size: 11px;
 }
 
-.sidebar-survey-row.selected .sidebar-survey {
+.sidebar-survey.selected {
   border-color: #dfe5ec;
   background: #ffffff;
   box-shadow: 0 5px 18px rgba(31, 49, 70, 0.05);
