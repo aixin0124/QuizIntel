@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .config import settings
 from .services.analytics_service import (
+    build_research_analysis,
     build_response,
     calculate_result_type,
     summarize_responses,
@@ -186,7 +187,7 @@ def wrap_survey(
 def list_public_surveys() -> dict[str, Any]:
     """用户端只读取可参与的问卷摘要。"""
 
-    return {"items": database.list_surveys()}
+    return {"items": database.list_surveys(status="open")}
 
 
 @app.get("/api/public/surveys/{survey_id}")
@@ -194,6 +195,8 @@ def get_public_survey(survey_id: int) -> dict[str, Any]:
     row = database.get_survey(survey_id)
     if not row:
         raise HTTPException(status_code=404, detail="问卷不存在。")
+    if row["status"] != "open":
+        raise HTTPException(status_code=410, detail="该问卷已结束，不再接受新的答卷。")
     payload = dict(row["payload"])
     payload.pop("brand_goal", None)
     for question in payload.get("questions", []):
@@ -226,6 +229,8 @@ def submit_response(request: ResponseRequest) -> dict[str, Any]:
     row = database.get_survey(request.survey_id)
     if not row:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["status"] != "open":
+        raise HTTPException(status_code=410, detail="该问卷已结束，不再接受新的答卷。")
     survey = wrapped_survey_from_dict(row["payload"])
     try:
         validate_answers(survey, request.answers)
@@ -251,7 +256,50 @@ def get_analytics(survey_id: int, x_admin_token: str | None = Header(default=Non
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
     responses = database.list_responses(survey_id)
-    return {"summary": summarize_responses(survey, responses), "survey": survey.to_dict()}
+    return {
+        "status": row["status"],
+        "ended_at": row["ended_at"],
+        "summary": summarize_responses(survey, responses),
+        "analysis": row["analysis"],
+        "survey": survey.to_dict(),
+    }
+
+
+@app.post("/api/analytics/{survey_id}/finish")
+def finish_analytics(
+    survey_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """结束问卷，生成一次最终研究分析并锁定问卷状态。"""
+
+    require_admin(x_admin_token)
+    row = database.get_survey(survey_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["status"] == "ended" and row["analysis"]:
+        return {
+            "status": row["status"],
+            "ended_at": row["ended_at"],
+            "analysis": row["analysis"],
+        }
+    if not settings.has_llm:
+        raise HTTPException(status_code=400, detail="未配置 LLM_API_KEY，不能生成 AI 数据分析。")
+    survey = wrapped_survey_from_dict(row["payload"])
+    responses = database.list_responses(survey_id)
+    if not responses:
+        raise HTTPException(status_code=422, detail="至少收集 1 份有效答卷后才能开始数据分析。")
+    try:
+        analysis = build_research_analysis(survey, responses)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI 数据分析失败：{exc}") from exc
+    finished = database.finish_survey(survey_id, analysis)
+    return {
+        "status": finished["status"] if finished else "ended",
+        "ended_at": finished["ended_at"] if finished else None,
+        "analysis": analysis,
+    }
 
 
 @app.get("/api/analytics/{survey_id}/pdf")
@@ -262,6 +310,7 @@ def export_pdf(survey_id: int, x_admin_token: str | None = Header(default=None))
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
     summary = summarize_responses(survey, database.list_responses(survey_id))
+    summary["analysis"] = row["analysis"]
     return Response(
         content=build_research_pdf(survey, summary),
         media_type="application/pdf",

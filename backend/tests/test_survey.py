@@ -2,12 +2,15 @@
 
 from backend.models import SurveyQuestion
 from backend.services.analytics_service import (
+    build_research_analysis,
     build_response,
+    build_research_facts,
     calculate_result_type,
     calculate_dimension_scores,
     summarize_responses,
     validate_answers,
 )
+from backend.storage.database import ResearchDatabase
 from backend.services.survey_service import (
     MIN_GENERATED_QUESTIONS,
     _normalize_wrapped_survey,
@@ -40,6 +43,21 @@ class FakeLLMService:
                     "research_tag": "price",
                 }
             ],
+        }
+
+
+class FakeAnalysisLLMService:
+    """返回固定分析文案，验证数字仍由本地事实决定。"""
+
+    def generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+        return {
+            "key_findings": ["样本在该主题维度上呈现可观察差异。"],
+            "dimension_conclusions": [
+                {"key": "initiative", "conclusion": "该维度反映样本的行动倾向。"}
+            ],
+            "research_conclusion": "当前样本可以支持初步研究判断。",
+            "long_summary": "这是一段用于测试的完整总结文字。",
+            "limitations": "测试样本不代表总体人群。",
         }
 
 
@@ -230,3 +248,85 @@ def test_dimension_scores_ignore_unconfigured_questions() -> None:
     scores = calculate_dimension_scores(survey, {"q1": "200"})
 
     assert scores == {"initiative": 1.0, "prudence": 0.0}
+
+
+def test_research_facts_keep_exact_counts_and_percentages() -> None:
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "你会怎么做", options=["先观察", "马上行动"], research_tag="行动")],
+        "大学生消费情况调查",
+        "行动风格",
+        llm_service=FakeLLMService(),
+    )
+    survey.dimensions = [
+        {
+            "key": "initiative",
+            "name": "主动性",
+            "description": "面对机会时的行动倾向",
+            "high_pole": "更主动",
+            "low_pole": "更谨慎",
+        }
+    ]
+    survey.questions[0].option_scores = {
+        "先观察": {"initiative": -0.5},
+        "马上行动": {"initiative": 0.5},
+    }
+    survey.questions[0].dimension_weights = {"initiative": 1.0}
+    responses = [
+        build_response(survey, {"q1": "先观察"}, "探索型"),
+        build_response(survey, {"q1": "马上行动"}, "探索型"),
+    ]
+
+    facts = build_research_facts(survey, responses)
+
+    assert facts["response_count"] == 2
+    assert facts["questions"][0]["options"] == [
+        {"option": "先观察", "count": 1, "percentage": 50.0},
+        {"option": "马上行动", "count": 1, "percentage": 50.0},
+    ]
+    assert facts["dimensions"][0]["index"] == 50.0
+
+
+def test_ai_research_analysis_preserves_local_facts() -> None:
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "你会怎么做", options=["先观察", "马上行动"], research_tag="行动")],
+        "大学生消费情况调查",
+        "行动风格",
+        llm_service=FakeLLMService(),
+    )
+    survey.dimensions = [{"key": "initiative", "name": "主动性"}]
+    survey.questions[0].option_scores = {
+        "先观察": {"initiative": -0.5},
+        "马上行动": {"initiative": 0.5},
+    }
+    survey.questions[0].dimension_weights = {"initiative": 1.0}
+    responses = [
+        build_response(survey, {"q1": "马上行动"}, "探索型"),
+        build_response(survey, {"q1": "马上行动"}, "探索型"),
+    ]
+
+    analysis = build_research_analysis(survey, responses, FakeAnalysisLLMService())
+
+    assert analysis["response_count"] == 2
+    assert analysis["questions"][0]["options"][1]["count"] == 2
+    assert analysis["questions"][0]["options"][1]["percentage"] == 100.0
+    assert analysis["research_conclusion"] == "当前样本可以支持初步研究判断。"
+
+
+def test_database_survey_status_changes_to_ended(tmp_path) -> None:
+    database = ResearchDatabase(str(tmp_path / "survey.sqlite"))
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"])],
+        "大学生消费情况调查",
+        "消费偏好",
+        llm_service=FakeLLMService(),
+    )
+    survey_id = database.save_survey(survey)
+
+    assert database.get_survey(survey_id)["status"] == "open"
+    database.finish_survey(survey_id, {"research_conclusion": "完成"})
+
+    saved = database.get_survey(survey_id)
+    assert saved["status"] == "ended"
+    assert saved["analysis"]["research_conclusion"] == "完成"
+    assert database.list_surveys(status="open") == []
+    assert database.list_surveys(status="ended")[0]["id"] == survey_id

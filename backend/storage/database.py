@@ -35,7 +35,10 @@ class ResearchDatabase:
                     theme TEXT NOT NULL,
                     source TEXT NOT NULL,
                     created_at TEXT NOT NULL,
-                    payload TEXT NOT NULL
+                    payload TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    ended_at TEXT,
+                    analysis_payload TEXT
                 );
                 CREATE TABLE IF NOT EXISTS responses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,12 +51,31 @@ class ResearchDatabase:
                 CREATE INDEX IF NOT EXISTS idx_responses_survey_id ON responses(survey_id);
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(wrapped_surveys)"
+                ).fetchall()
+            }
+            if "status" not in columns:
+                connection.execute(
+                    "ALTER TABLE wrapped_surveys ADD COLUMN status TEXT NOT NULL DEFAULT 'open'"
+                )
+            if "ended_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE wrapped_surveys ADD COLUMN ended_at TEXT"
+                )
+            if "analysis_payload" not in columns:
+                connection.execute(
+                    "ALTER TABLE wrapped_surveys ADD COLUMN analysis_payload TEXT"
+                )
 
     def save_survey(self, survey: WrappedSurvey) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 "INSERT INTO wrapped_surveys "
-                "(survey_name, theme, source, created_at, payload) VALUES (?, ?, ?, ?, ?)",
+                "(survey_name, theme, source, created_at, payload, status) "
+                "VALUES (?, ?, ?, ?, ?, 'open')",
                 (
                     survey.survey_name,
                     survey.theme,
@@ -78,13 +100,18 @@ class ResearchDatabase:
             )
             return int(cursor.lastrowid)
 
-    def list_surveys(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_surveys(
+        self, limit: int = 20, status: str | None = None
+    ) -> list[dict[str, Any]]:
         with self._connect() as connection:
+            where = "WHERE s.status = ?" if status else ""
+            params: tuple[Any, ...] = (status, limit) if status else (limit,)
             rows = connection.execute(
                 "SELECT s.id, s.survey_name, s.theme, s.source, s.created_at, "
+                "s.status, s.ended_at, "
                 "(SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.id) AS response_count "
-                "FROM wrapped_surveys s ORDER BY s.id DESC LIMIT ?",
-                (limit,),
+                f"FROM wrapped_surveys s {where} ORDER BY s.id DESC LIMIT ?",
+                params,
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -99,7 +126,24 @@ class ResearchDatabase:
             return None
         item = dict(row)
         item["payload"] = json.loads(item["payload"])
+        item["analysis"] = (
+            json.loads(item["analysis_payload"])
+            if item.get("analysis_payload")
+            else None
+        )
         return item
+
+    def finish_survey(self, survey_id: int, analysis: dict[str, Any]) -> dict[str, Any] | None:
+        """保存最终分析并将问卷状态切换为已结束。"""
+
+        ended_at = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE wrapped_surveys SET status = 'ended', ended_at = ?, "
+                "analysis_payload = ? WHERE id = ?",
+                (ended_at, json.dumps(analysis, ensure_ascii=False), survey_id),
+            )
+        return self.get_survey(survey_id)
 
     def list_responses(self, survey_id: int) -> list[SurveyResponse]:
         """按包装方案编号读取答卷，避免同名问卷的数据相互混入。"""

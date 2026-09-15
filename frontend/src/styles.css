@@ -1205,6 +1205,301 @@ small {
   white-space: nowrap;
 }
 
+.source-badge.open {
+  border-color: #c7e4db;
+  background: #effaf7;
+  color: #337967;
+}
+
+.source-badge.ended {
+  border-color: #cbdcfb;
+  background: #eef5ff;
+  color: #2467e8;
+}
+
+.survey-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px 18px;
+}
+
+.survey-control strong {
+  display: block;
+  font-size: 14px;
+}
+
+.survey-control p {
+  margin: 5px 0 0;
+  color: #788594;
+  font-size: 12px;
+}
+
+.survey-control button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.ended-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  color: #337967;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.survey-status {
+  display: inline-block;
+  margin-left: 7px;
+  border-radius: 999px;
+  background: #effaf7;
+  color: #337967;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.survey-status.ended {
+  background: #eef5ff;
+  color: #2467e8;
+}
+
+.analysis-locked {
+  min-height: 360px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  text-align: center;
+}
+
+.analysis-locked > svg {
+  margin-bottom: 17px;
+  color: #9aa7b5;
+}
+
+.analysis-locked h2 {
+  max-width: 680px;
+  margin: 0 0 10px;
+}
+
+.analysis-locked p:last-child {
+  max-width: 600px;
+  margin: 0;
+  color: #788594;
+}
+
+.analysis-summary,
+.analysis-section,
+.analysis-findings,
+.analysis-limitations {
+  margin-top: 18px;
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 22px;
+}
+
+.analysis-summary-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid #e4e9ef;
+  padding-bottom: 15px;
+}
+
+.analysis-summary-title div {
+  display: grid;
+  gap: 5px;
+}
+
+.analysis-summary-title span:first-child {
+  color: #788594;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.analysis-summary-title strong {
+  font-size: 17px;
+}
+
+.analysis-time {
+  color: #8995a2;
+  font-size: 11px;
+}
+
+.analysis-conclusion {
+  margin: 17px 0 0;
+  color: #24364a;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.8;
+}
+
+.analysis-long-summary {
+  margin-top: 17px;
+  border-left: 3px solid #32a287;
+  background: #f3faf7;
+  padding: 13px 16px;
+}
+
+.analysis-long-summary strong,
+.analysis-limitations strong {
+  color: #285a4d;
+  font-size: 13px;
+}
+
+.analysis-long-summary p,
+.analysis-limitations p {
+  margin: 7px 0 0;
+  color: #52667d;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.analysis-findings .section-heading,
+.analysis-section .section-heading {
+  align-items: flex-start;
+  margin-bottom: 15px;
+}
+
+.finding-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.finding-grid article {
+  border-top: 2px solid #2467e8;
+  background: #f7faff;
+  padding: 14px;
+}
+
+.finding-grid article > span {
+  color: #2467e8;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.finding-grid p {
+  margin: 8px 0 0;
+  color: #354559;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.analysis-dimension-list,
+.analysis-data-list {
+  border-top: 1px solid #e1e6ed;
+}
+
+.analysis-dimension {
+  border-bottom: 1px solid #e1e6ed;
+  padding: 17px 0;
+}
+
+.analysis-dimension-head,
+.analysis-question-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.analysis-dimension-head div,
+.analysis-question-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.analysis-dimension-head strong,
+.analysis-question-head strong {
+  color: #24364a;
+  font-size: 14px;
+}
+
+.analysis-dimension-head span,
+.analysis-question-head span,
+.analysis-dimension small {
+  color: #8995a2;
+  font-size: 11px;
+}
+
+.analysis-dimension-head b {
+  color: #2467e8;
+  font-size: 23px;
+}
+
+.analysis-dimension .dimension-scale {
+  margin-top: 11px;
+}
+
+.analysis-dimension p {
+  margin: 10px 0 4px;
+  color: #52667d;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.analysis-question {
+  border-bottom: 1px solid #e1e6ed;
+  padding: 17px 0 19px;
+}
+
+.analysis-question-head > span {
+  color: #2467e8;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.analysis-question > p {
+  margin: 11px 0;
+  color: #354559;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.option-stat {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(100px, 1.5fr) 135px;
+  align-items: center;
+  gap: 11px;
+  margin-top: 9px;
+  color: #647486;
+  font-size: 12px;
+}
+
+.option-stat-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e4e9f1;
+}
+
+.option-stat-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2467e8;
+}
+
+.option-stat b {
+  color: #354559;
+  font-size: 11px;
+  text-align: right;
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1410,8 +1705,24 @@ small {
   .admin-shell,
   .workspace.two,
   .dashboard-grid,
-  .result-insights {
+  .result-insights,
+  .finding-grid {
     grid-template-columns: 1fr;
+  }
+
+  .survey-control,
+  .analysis-summary-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .survey-control button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .option-stat {
+    grid-template-columns: minmax(100px, 0.9fr) minmax(80px, 1.5fr) 108px;
   }
 
   .hero {
@@ -1524,6 +1835,36 @@ small {
 
   .page-title > .source-badge {
     margin-top: 0;
+  }
+
+  .analysis-summary,
+  .analysis-section,
+  .analysis-findings,
+  .analysis-limitations {
+    padding: 19px;
+  }
+
+  .analysis-question-head {
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .analysis-question-head > span {
+    text-align: left;
+  }
+
+  .option-stat {
+    grid-template-columns: 1fr 90px;
+    gap: 6px 9px;
+  }
+
+  .option-stat-track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .option-stat b {
+    text-align: right;
   }
 
   .editor-fields {
