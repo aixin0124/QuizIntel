@@ -38,7 +38,8 @@ class ResearchDatabase:
                     payload TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'open',
                     ended_at TEXT,
-                    analysis_payload TEXT
+                    analysis_payload TEXT,
+                    deleted_at TEXT
                 );
                 CREATE TABLE IF NOT EXISTS responses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,6 +69,10 @@ class ResearchDatabase:
             if "analysis_payload" not in columns:
                 connection.execute(
                     "ALTER TABLE wrapped_surveys ADD COLUMN analysis_payload TEXT"
+                )
+            if "deleted_at" not in columns:
+                connection.execute(
+                    "ALTER TABLE wrapped_surveys ADD COLUMN deleted_at TEXT"
                 )
 
     def save_survey(self, survey: WrappedSurvey) -> int:
@@ -101,17 +106,29 @@ class ResearchDatabase:
             return int(cursor.lastrowid)
 
     def list_surveys(
-        self, limit: int = 20, status: str | None = None
+        self,
+        limit: int = 20,
+        status: str | None = None,
+        deleted: bool | None = False,
     ) -> list[dict[str, Any]]:
         with self._connect() as connection:
-            where = "WHERE s.status = ?" if status else ""
-            params: tuple[Any, ...] = (status, limit) if status else (limit,)
+            conditions: list[str] = []
+            values: list[Any] = []
+            if status:
+                conditions.append("s.status = ?")
+                values.append(status)
+            if deleted is True:
+                conditions.append("s.deleted_at IS NOT NULL")
+            elif deleted is False:
+                conditions.append("s.deleted_at IS NULL")
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            values.append(limit)
             rows = connection.execute(
                 "SELECT s.id, s.survey_name, s.theme, s.source, s.created_at, "
-                "s.status, s.ended_at, "
+                "s.status, s.ended_at, s.deleted_at, "
                 "(SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.id) AS response_count "
                 f"FROM wrapped_surveys s {where} ORDER BY s.id DESC LIMIT ?",
-                params,
+                tuple(values),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -144,6 +161,47 @@ class ResearchDatabase:
                 (ended_at, json.dumps(analysis, ensure_ascii=False), survey_id),
             )
         return self.get_survey(survey_id)
+
+    def move_survey_to_trash(self, survey_id: int) -> dict[str, Any] | None:
+        """将问卷软删除到回收站，保留所有答卷和分析数据。"""
+
+        deleted_at = datetime.now().isoformat(timespec="seconds")
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE wrapped_surveys SET deleted_at = ? "
+                "WHERE id = ? AND deleted_at IS NULL",
+                (deleted_at, survey_id),
+            )
+        return self.get_survey(survey_id)
+
+    def restore_survey(self, survey_id: int) -> dict[str, Any] | None:
+        """从回收站恢复问卷。"""
+
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE wrapped_surveys SET deleted_at = NULL "
+                "WHERE id = ? AND deleted_at IS NOT NULL",
+                (survey_id,),
+            )
+        return self.get_survey(survey_id)
+
+    def permanently_delete_survey(self, survey_id: int) -> bool:
+        """永久删除问卷及其答卷，调用方需先经过后台权限校验。"""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM wrapped_surveys WHERE id = ? AND deleted_at IS NOT NULL",
+                (survey_id,),
+            ).fetchone()
+            if not row:
+                return False
+            connection.execute(
+                "DELETE FROM responses WHERE survey_id = ?", (survey_id,)
+            )
+            connection.execute(
+                "DELETE FROM wrapped_surveys WHERE id = ?", (survey_id,)
+            )
+        return True
 
     def list_responses(self, survey_id: int) -> list[SurveyResponse]:
         """按包装方案编号读取答卷，避免同名问卷的数据相互混入。"""

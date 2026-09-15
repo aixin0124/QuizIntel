@@ -195,6 +195,8 @@ def get_public_survey(survey_id: int) -> dict[str, Any]:
     row = database.get_survey(survey_id)
     if not row:
         raise HTTPException(status_code=404, detail="问卷不存在。")
+    if row["deleted_at"]:
+        raise HTTPException(status_code=404, detail="问卷不存在。")
     if row["status"] != "open":
         raise HTTPException(status_code=410, detail="该问卷已结束，不再接受新的答卷。")
     payload = dict(row["payload"])
@@ -215,6 +217,14 @@ def list_surveys(x_admin_token: str | None = Header(default=None)) -> dict[str, 
     return {"items": database.list_surveys()}
 
 
+@app.get("/api/surveys/trash")
+def list_trash_surveys(x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    """列出已移入回收站的问卷。"""
+
+    require_admin(x_admin_token)
+    return {"items": database.list_surveys(deleted=True)}
+
+
 @app.get("/api/surveys/{survey_id}")
 def get_survey(survey_id: int, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     require_admin(x_admin_token)
@@ -224,10 +234,57 @@ def get_survey(survey_id: int, x_admin_token: str | None = Header(default=None))
     return row
 
 
+@app.delete("/api/surveys/{survey_id}")
+def delete_survey(
+    survey_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """将问卷移入回收站。"""
+
+    require_admin(x_admin_token)
+    row = database.get_survey(survey_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["deleted_at"]:
+        return {"item": row, "message": "问卷已在回收站。"}
+    deleted = database.move_survey_to_trash(survey_id)
+    return {"item": deleted, "message": "问卷已移入回收站。"}
+
+
+@app.post("/api/surveys/{survey_id}/restore")
+def restore_survey(
+    survey_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """从回收站恢复问卷。"""
+
+    require_admin(x_admin_token)
+    row = database.get_survey(survey_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    restored = database.restore_survey(survey_id)
+    return {"item": restored, "message": "问卷已恢复。"}
+
+
+@app.delete("/api/surveys/{survey_id}/permanent")
+def permanently_delete_survey(
+    survey_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """永久删除回收站中的问卷和答卷。"""
+
+    require_admin(x_admin_token)
+    if not database.permanently_delete_survey(survey_id):
+        raise HTTPException(status_code=404, detail="只能永久删除回收站中的问卷。")
+    return {"message": "问卷已永久删除。"}
+
+
 @app.post("/api/responses")
 def submit_response(request: ResponseRequest) -> dict[str, Any]:
     row = database.get_survey(request.survey_id)
     if not row:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     if row["status"] != "open":
         raise HTTPException(status_code=410, detail="该问卷已结束，不再接受新的答卷。")
@@ -254,6 +311,8 @@ def get_analytics(survey_id: int, x_admin_token: str | None = Header(default=Non
     row = database.get_survey(survey_id)
     if not row:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["deleted_at"]:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
     responses = database.list_responses(survey_id)
     return {
@@ -275,6 +334,8 @@ def finish_analytics(
     require_admin(x_admin_token)
     row = database.get_survey(survey_id)
     if not row:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     if row["status"] == "ended" and row["analysis"]:
         return {
@@ -308,6 +369,8 @@ def export_pdf(survey_id: int, x_admin_token: str | None = Header(default=None))
     row = database.get_survey(survey_id)
     if not row:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["deleted_at"]:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
     summary = summarize_responses(survey, database.list_responses(survey_id))
     summary["analysis"] = row["analysis"]
@@ -325,6 +388,8 @@ def export_excel(survey_id: int, x_admin_token: str | None = Header(default=None
     require_admin(x_admin_token)
     row = database.get_survey(survey_id)
     if not row:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
     content = build_research_xlsx(survey, database.list_response_rows(survey_id))
