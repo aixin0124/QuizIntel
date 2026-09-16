@@ -15,6 +15,7 @@ type AnalyticsSummary = { response_count: number; result_counts: Record<string, 
 type DimensionStat = { key: string; name: string; description: string; high_pole?: string; low_pole?: string; score?: number | null; index?: number | null; positive_count?: number | null; neutral_count?: number | null; negative_count?: number | null; coverage_count: number; mapped_question_ids: string[]; mapped_research_tags: string[]; conclusion?: string };
 type QuestionStat = { question_id: string; question: string; research_tag: string; answered_count: number; answer_rate: number; options: Array<{ option: string; count: number; percentage: number }>; dimension_keys: string[] };
 type ResearchAnalysis = { generated_at: string; research_goal: string; theme: string; response_count: number; result_counts: Record<string, number>; research_tags: string[]; dimensions: DimensionStat[]; questions: QuestionStat[]; key_findings: string[]; research_conclusion: string; long_summary: string; limitations: string; analysis_method: string };
+type GenerationStep = { title: string; detail: string };
 
 const demoQuestionnaire = JSON.stringify([
   { id: "q1", question: "你配置一台主机的预算是多少？", type: "single_choice", options: ["8000元以下", "8000-20000元", "20001元以上"], research_tag: "价格接受区间" },
@@ -32,6 +33,20 @@ const demoQuestionnaire = JSON.stringify([
   { id: "q13", question: "你更愿意从哪里购买主机或硬件？", type: "single_choice", options: ["品牌整机", "电商平台的装机服务", "线下电脑城或门店", "自己购买零件组装"], research_tag: "购买渠道偏好" },
   { id: "q14", question: "如果装机过程中遇到兼容性问题，你会？", type: "single_choice", options: ["自己查资料解决", "找懂电脑的朋友帮忙", "联系商家或售后", "宁愿选择省心的整机方案"], research_tag: "服务依赖程度" },
 ], null, 2);
+
+const generationSteps: GenerationStep[] = [
+  { title: "提炼主题", detail: "抽取调研目标、用户语境和可包装的互动主题。" },
+  { title: "设计题目", detail: "把研究字段转成更自然的场景问题，并检查选项覆盖。" },
+  { title: "问卷分析", detail: "建立结果类型、评分映射和后续数据分析维度。" },
+];
+
+const fallbackHeadlines = [
+  "AI 正在同步热点灵感，稍后会继续尝试读取今日头条。",
+  "生成期间可以停留在本页，完成后会自动进入新问卷。",
+  "系统正在校验题目映射，避免分析维度和原始问卷脱节。",
+];
+
+const headlineApiUrl = "https://api.zxki.cn/api/jhrs?type=douyin";
 
 function App() {
   const [mode, setMode] = useState<"user" | "admin">("user");
@@ -122,8 +137,109 @@ function buildDefaultBrandGoal(surveyTitle = "") {
 }
 
 function GenerationOverlay({ visible }: { visible: boolean }) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [activeStep, setActiveStep] = useState(0);
+  const [headlines, setHeadlines] = useState(fallbackHeadlines);
+  const [headlineIndex, setHeadlineIndex] = useState(0);
+  const headlinesRef = useRef(fallbackHeadlines);
+
+  useEffect(() => {
+    if (!visible) return;
+    setElapsedSeconds(0);
+    setActiveStep(0);
+    setHeadlineIndex(0);
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      setElapsedSeconds(elapsed);
+      setActiveStep(Math.min(generationSteps.length - 1, elapsed < 5 ? 0 : elapsed < 12 ? 1 : 2));
+    }, 1000);
+
+    const controller = new AbortController();
+    void loadHeadlines(controller.signal).then((items) => {
+      if (!items.length) return;
+      headlinesRef.current = items;
+      setHeadlines(items);
+      setHeadlineIndex(0);
+    }).catch(() => {
+      headlinesRef.current = fallbackHeadlines;
+    });
+
+    return () => {
+      window.clearInterval(timer);
+      controller.abort();
+    };
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    const ticker = window.setInterval(() => {
+      const items = headlinesRef.current;
+      if (items.length > 1) setHeadlineIndex((index) => (index + 1) % items.length);
+    }, 5000);
+    return () => window.clearInterval(ticker);
+  }, [visible]);
+
   if (!visible) return null;
-  return <div className="generation-overlay" role="status" aria-live="polite"><div className="generation-window"><div className="generation-icon"><LoaderCircle size={28} /></div><p className="eyebrow">AI GENERATION</p><h2>正在生成你的互动测评</h2><p>正在理解研究目标、设计主题维度、编排场景题，并校验评分映射。</p><div className="generation-steps"><span className="active">提炼主题</span><span>设计题目</span><span>生成分析</span></div></div></div>;
+  return <div className="generation-overlay" role="status" aria-live="polite"><div className="generation-window">
+    <div className="generation-window-top"><div className="generation-icon"><LoaderCircle size={28} /></div><span className="generation-live"><i /> LIVE</span></div>
+    <p className="eyebrow">AI GENERATION</p>
+    <h2>正在生成你的互动测评</h2>
+    <p className="generation-description">正在理解研究目标、设计主题维度、编排场景题，并校验评分映射。</p>
+    <div className="generation-steps">
+      {generationSteps.map((step, index) => <div className={`generation-step ${index < activeStep ? "done" : index === activeStep ? "active" : ""}`} key={step.title}>
+        <span className="generation-step-marker">{index < activeStep ? "✓" : String(index + 1).padStart(2, "0")}</span>
+        <div><strong>{step.title}</strong><small>{index === activeStep ? step.detail : index < activeStep ? "已完成，结果已交给下一阶段。" : "等待前置阶段完成。"}</small></div>
+        {index === activeStep && <LoaderCircle className="generation-step-loader" size={16} />}
+      </div>)}
+    </div>
+    <div className="generation-news"><span className="generation-news-label"><Sparkles size={13} /> 当今头条</span><span className="generation-news-text" key={headlines[headlineIndex]}>{headlines[headlineIndex]}</span></div>
+    <div className="generation-elapsed"><span>已加载</span><strong>{formatElapsed(elapsedSeconds)}</strong></div>
+  </div></div>;
+}
+
+function formatElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const remainder = (seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${remainder}`;
+}
+
+async function loadHeadlines(signal: AbortSignal): Promise<string[]> {
+  try {
+    const proxyResponse = await fetch("/api/headlines", { signal, headers: { Accept: "application/json" } });
+    if (proxyResponse.ok) return normalizeHeadlines(await proxyResponse.json() as unknown);
+  } catch {
+    // 代理不可用时继续尝试浏览器直连。
+  }
+  const response = await fetch(headlineApiUrl, { signal, headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`头条接口请求失败（HTTP ${response.status}）`);
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("json") ? await response.json() as unknown : await response.text();
+  return normalizeHeadlines(payload);
+}
+
+function normalizeHeadlines(payload: unknown): string[] {
+  const titles: string[] = [];
+  const visit = (value: unknown) => {
+    if (typeof value === "string") {
+      const text = value.replace(/\s+/g, " ").trim();
+      if (text.length >= 6 && text.length <= 160) titles.push(text);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    const title = record.title ?? record.name ?? record.text ?? record.content ?? record.desc;
+    if (typeof title === "string") visit(title);
+    Object.entries(record).forEach(([key, item]) => {
+      if (!["title", "name", "text", "content", "desc"].includes(key)) visit(item);
+    });
+  };
+  visit(payload);
+  return Array.from(new Set(titles)).slice(0, 20);
 }
 
 function Dashboard({ survey, summary, surveyCount, loading, token, selectedId, status, finishing, onFinish }: { survey: WrappedSurvey | null; summary: AnalyticsSummary | null; surveyCount: number; loading: boolean; token: string; selectedId: number | null; status: "open" | "ended"; finishing: boolean; onFinish: () => void }) {

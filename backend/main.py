@@ -6,6 +6,7 @@ import json
 import secrets
 from typing import Any
 
+import requests
 from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -87,6 +88,25 @@ def health() -> dict[str, Any]:
         "llm_wire_api": settings.llm_wire_api,
         "llm_reasoning_effort": settings.llm_reasoning_effort,
     }
+
+
+@app.get("/api/headlines")
+def get_headlines() -> Any:
+    """代理读取头条接口，避免浏览器跨域限制。"""
+
+    try:
+        response = requests.get(
+            "https://api.zxki.cn/api/jhrs?type=douyin",
+            headers={"Accept": "application/json", "User-Agent": "FunResearch/1.0"},
+            timeout=8,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"头条接口暂时不可用：{exc}") from exc
+    try:
+        return response.json()
+    except ValueError:
+        return {"data": response.text}
 
 
 @app.post("/api/admin/login")

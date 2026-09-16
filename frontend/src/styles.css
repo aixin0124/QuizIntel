@@ -904,13 +904,20 @@ small {
 }
 
 .generation-window {
+  position: relative;
   width: min(100%, 480px);
   border: 1px solid #dfe5ec;
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 24px 70px rgba(18, 35, 54, 0.2);
   padding: 32px;
-  text-align: center;
+  overflow: hidden;
+}
+
+.generation-window-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .generation-icon {
@@ -924,41 +931,167 @@ small {
   color: #2467e8;
 }
 
+.generation-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #2d806d;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.generation-live i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #32a287;
+  box-shadow: 0 0 0 4px rgba(50, 162, 135, 0.12);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
 .generation-icon svg {
   animation: spin 1.1s linear infinite;
 }
 
 .generation-window h2 {
+  margin-top: 22px;
   margin-bottom: 9px;
 }
 
-.generation-window > p:not(.eyebrow) {
-  margin: 0 auto;
+.generation-description {
+  margin: 0;
   color: #687686;
   font-size: 13px;
   line-height: 1.7;
 }
 
 .generation-steps {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 22px;
+  display: grid;
+  gap: 9px;
+  margin-top: 24px;
 }
 
-.generation-steps span {
+.generation-step {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 10px;
   border: 1px solid #d7dee7;
-  border-radius: 999px;
+  border-radius: 7px;
   color: #8995a2;
-  font-size: 11px;
-  padding: 6px 9px;
+  padding: 10px 12px;
+  text-align: left;
+  transition: border-color 220ms ease, background 220ms ease, color 220ms ease, transform 220ms ease;
 }
 
-.generation-steps span.active {
+.generation-step.active {
   border-color: #c7dafa;
   background: #eef5ff;
   color: #2467e8;
+  transform: translateX(4px);
+}
+
+.generation-step.done {
+  border-color: #bfe1d7;
+  background: #f2fbf8;
+  color: #2d806d;
+}
+
+.generation-step-marker {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef1f4;
+  color: #7b8795;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.generation-step.active .generation-step-marker {
+  background: #2467e8;
+  color: #ffffff;
+}
+
+.generation-step.done .generation-step-marker {
+  background: #32a287;
+  color: #ffffff;
+}
+
+.generation-step strong,
+.generation-step small {
+  display: block;
+}
+
+.generation-step strong {
+  font-size: 13px;
+}
+
+.generation-step small {
+  margin-top: 3px;
+  color: #7c8895;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.generation-step.active small {
+  color: #5878b5;
+}
+
+.generation-step-loader {
+  animation: spin 1.1s linear infinite;
+}
+
+.generation-news {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 35px;
+  margin-top: 20px;
+  border-top: 1px solid #e8edf2;
+  border-bottom: 1px solid #e8edf2;
+  overflow: hidden;
+}
+
+.generation-news-label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  color: #d46a36;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.generation-news-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #687686;
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: ticker-in 420ms ease both;
+}
+
+.generation-elapsed {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 13px;
+  color: #8a96a3;
+  font-size: 11px;
+  text-align: right;
+}
+
+.generation-elapsed strong {
+  color: #18212b;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
 .method-note {
@@ -982,6 +1115,15 @@ small {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes pulse {
+  50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+@keyframes ticker-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 .user-layout {
@@ -1980,6 +2122,20 @@ small {
   .testSurface,
   .login-panel {
     padding: 19px;
+  }
+
+  .generation-window {
+    padding: 22px 18px;
+  }
+
+  .generation-window h2 {
+    font-size: 22px;
+  }
+
+  .generation-step {
+    grid-template-columns: 28px minmax(0, 1fr) 16px;
+    gap: 8px;
+    padding: 9px;
   }
 
   .metrics {
