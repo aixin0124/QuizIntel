@@ -243,6 +243,8 @@ class ResearchDatabase:
                     "created_at": row["created_at"],
                     "answers": payload.get("answers", {}),
                     "research_answers": payload.get("research_answers", {}),
+                    "dimension_scores": payload.get("dimension_scores", {}),
+                    "analysis": payload.get("analysis", {}),
                 }
             )
         return result

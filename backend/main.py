@@ -438,7 +438,7 @@ def export_pdf(survey_id: int, x_admin_token: str | None = Header(default=None))
 
 @app.get("/api/analytics/{survey_id}/excel")
 def export_excel(survey_id: int, x_admin_token: str | None = Header(default=None)) -> Response:
-    """导出题目映射和答卷明细 Excel。"""
+    """导出完整研究分析和答卷明细 Excel。"""
 
     require_admin(x_admin_token)
     row = database.get_survey(survey_id)
@@ -447,7 +447,14 @@ def export_excel(survey_id: int, x_admin_token: str | None = Header(default=None
     if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
-    content = build_research_xlsx(survey, database.list_response_rows(survey_id))
+    responses = database.list_responses(survey_id)
+    summary = summarize_responses(survey, responses)
+    content = build_research_xlsx(
+        survey,
+        database.list_response_rows(survey_id),
+        summary,
+        row["analysis"],
+    )
     return Response(
         content=content,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

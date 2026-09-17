@@ -1,6 +1,9 @@
 """问卷包装模块的基础测试。"""
 
+from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import patch
+from zipfile import ZipFile
 
 import requests
 
@@ -26,6 +29,8 @@ from backend.services.survey_service import (
     parse_wjx_html,
     wrapped_survey_from_dict,
 )
+from backend.utils.excel_export import build_research_xlsx
+from backend.utils.pdf_export import build_research_pdf
 
 
 class FakeLLMService:
@@ -468,6 +473,172 @@ def test_ai_research_analysis_preserves_local_facts() -> None:
     assert analysis["questions"][0]["options"][1]["count"] == 2
     assert analysis["questions"][0]["options"][1]["percentage"] == 100.0
     assert analysis["research_conclusion"] == "当前样本可以支持初步研究判断。"
+
+
+def test_excel_export_includes_mapping_scores_and_response_analysis() -> None:
+    survey = WrappedSurvey(
+        survey_name="行动风格测评",
+        theme="行动风格",
+        tagline="",
+        intro="",
+        disclosure="",
+        brand_goal="研究行动倾向",
+        dimensions=[{"key": "initiative", "name": "主动性"}],
+        result_types=[],
+        questions=[
+            WrappedQuestion(
+                question_id="q1",
+                public_text="你会怎么做？",
+                question_type="single_choice",
+                options=["先观察", "马上行动"],
+                research_tag="行动",
+                source_text="面对机会你会怎么做？",
+                research_refs=["原题 1"],
+                option_scores={"马上行动": {"initiative": 0.8}},
+                dimension_weights={"initiative": 1.0},
+                rationale="映射行动倾向。",
+            )
+        ],
+    )
+    response_rows = [
+        {
+            "id": 1,
+            "created_at": "2026-09-17T10:00:00",
+            "result_type": "开拓型",
+            "answers": {"q1": "马上行动"},
+            "research_answers": {"行动": "马上行动"},
+            "dimension_scores": {"initiative": 0.8},
+            "analysis": {
+                "summary": "积极解析",
+                "strengths": ["行动快"],
+                "watchouts": ["留意风险"],
+                "advice": "先验证再推进。",
+                "evidence": [
+                    {
+                        "question": "你会怎么做？",
+                        "answer": "马上行动",
+                        "reason": "主动性更高。",
+                    }
+                ],
+            },
+        }
+    ]
+    summary = {
+        "response_count": 1,
+        "research_tags": ["行动"],
+        "dimension_stats": [
+            {
+                "key": "initiative",
+                "name": "主动性",
+                "score": 0.8,
+                "index": 90,
+                "coverage_count": 1,
+                "positive_count": 1,
+                "neutral_count": 0,
+                "negative_count": 0,
+                "mapped_research_tags": ["行动"],
+                "mapped_question_ids": ["q1"],
+            }
+        ],
+    }
+
+    content = build_research_xlsx(survey, response_rows, summary, None)
+    with ZipFile(BytesIO(content)) as archive:
+        workbook_text = "\n".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.startswith("xl/worksheets/")
+        )
+
+    assert "选项评分映射" in workbook_text
+    assert "马上行动 -&gt; initiative:0.8" in workbook_text
+    assert "维度分数：主动性" in workbook_text
+    assert "结果解析" in workbook_text
+    assert "积极解析" in workbook_text
+    assert "你会怎么做？｜马上行动｜主动性更高。" in workbook_text
+
+
+def test_pdf_export_builds_result_and_dimension_detail_tables() -> None:
+    survey = WrappedSurvey(
+        survey_name="行动风格测评",
+        theme="行动风格",
+        tagline="",
+        intro="",
+        disclosure="",
+        brand_goal="研究行动倾向",
+        dimensions=[{"key": "initiative", "name": "主动性"}],
+        result_types=[],
+        questions=[],
+    )
+    summary = {
+        "response_count": 2,
+        "analysis": {
+            "research_goal": "研究行动倾向",
+            "theme": "行动风格",
+            "result_types": [
+                {
+                    "name": "开拓型",
+                    "count": 1,
+                    "percentage": 50.0,
+                    "personality_reference": "果断的行动者",
+                    "description": "行动更快。",
+                    "dimension_profile": {"initiative": 0.9},
+                    "strengths": ["推进快"],
+                    "watchouts": ["留意节奏"],
+                    "advice": "保留复盘。",
+                }
+            ],
+            "dimensions": [
+                {
+                    "key": "initiative",
+                    "name": "主动性",
+                    "description": "面对机会时的行动倾向",
+                    "high_pole": "更主动",
+                    "low_pole": "更谨慎",
+                    "index": 90,
+                    "score": 0.8,
+                    "coverage_count": 2,
+                    "positive_count": 1,
+                    "neutral_count": 1,
+                    "negative_count": 0,
+                    "mapped_research_tags": ["行动"],
+                    "mapped_question_ids": ["q1"],
+                    "conclusion": "样本主动性较高。",
+                }
+            ],
+            "questions": [],
+        },
+    }
+    captured_rows = []
+
+    class FakeDocument:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def build(self, story) -> None:
+            return None
+
+    class FakeTable:
+        def __init__(self, rows, *args, **kwargs) -> None:
+            captured_rows.extend(str(cell.text) for row in rows for cell in row)
+
+        def setStyle(self, style) -> None:
+            return None
+
+    with (
+        patch("backend.utils.pdf_export.SimpleDocTemplate", FakeDocument),
+        patch("backend.utils.pdf_export.Table", FakeTable),
+    ):
+        build_research_pdf(survey, summary)
+
+    table_text = "\n".join(captured_rows)
+    assert "人格参考" in table_text
+    assert "果断的行动者" in table_text
+    assert "维度画像" in table_text
+    assert "initiative:0.9" in table_text
+    assert "高分：更主动" in table_text
+    assert "正向：1" in table_text
+    assert "标签：行动" in table_text
 
 
 def test_database_survey_status_changes_to_ended(tmp_path) -> None:
