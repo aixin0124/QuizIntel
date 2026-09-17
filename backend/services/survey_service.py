@@ -6,13 +6,14 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import math
 import re
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import requests
 
@@ -264,6 +265,90 @@ def parse_wjx_url(url: str) -> tuple[str, list[SurveyQuestion]]:
     return parse_wjx_html(content, final_url)
 
 
+def parse_wjx_template_url(url: str) -> tuple[str, str, list[SurveyQuestion]]:
+    """从支持的公开模板页抓取一份真实问卷，并转换为统一题目结构。"""
+
+    parsed_template_url = urlparse(url.strip())
+    if parsed_template_url.hostname and parsed_template_url.hostname.lower().rstrip(".").endswith("wenjuan.com"):
+        return parse_wenjuan_template_url(url)
+
+    normalized_url = _validate_wjx_url(url)
+    parsed = urlparse(normalized_url)
+    if "/libt/" not in parsed.path.lower():
+        title, questions = parse_wjx_url(normalized_url)
+        return title, normalized_url, questions
+
+    try:
+        response = requests.get(
+            normalized_url,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/140.0 Safari/537.36"
+                ),
+            },
+            timeout=20,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+    except requests.Timeout as exc:
+        raise ValueError("问卷星模板页请求超时，请稍后重试。") from exc
+    except requests.RequestException as exc:
+        raise ValueError(f"问卷星模板页请求失败：{exc}") from exc
+
+    encoding = response.encoding or "utf-8"
+    content = response.content.decode(encoding, errors="replace")
+    candidates = _extract_wjx_template_candidates(content, str(response.url or normalized_url))
+    if not candidates:
+        raise ValueError("没有在问卷星模板页中找到可导入的真实问卷。")
+
+    last_error: Exception | None = None
+    for candidate in candidates[:6]:
+        try:
+            title, questions = parse_wjx_url(candidate)
+            return title, candidate, questions
+        except ValueError as exc:
+            last_error = exc
+    detail = f"：{last_error}" if last_error else ""
+    raise ValueError(f"问卷星模板页中的问卷暂时无法导入{detail}")
+
+
+def parse_wenjuan_template_url(url: str) -> tuple[str, str, list[SurveyQuestion]]:
+    """从问卷网公开模板详情页抓取真实问卷题目。"""
+
+    normalized_url = _validate_wenjuan_url(url)
+    try:
+        response = requests.get(
+            normalized_url,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/140.0 Safari/537.36"
+                ),
+            },
+            timeout=20,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+    except requests.Timeout as exc:
+        raise ValueError("问卷网模板页请求超时，请稍后重试。") from exc
+    except requests.RequestException as exc:
+        raise ValueError(f"问卷网模板页请求失败：{exc}") from exc
+
+    content = response.content.decode(response.encoding or "utf-8", errors="replace")
+    title = _extract_wenjuan_title(content)
+    questions = _extract_wenjuan_questions(content)
+    if not questions:
+        raise ValueError("没有在问卷网模板页中找到可导入的题目。")
+    return title, str(response.url or normalized_url), _validate_questions(questions)
+
+
 def parse_wjx_html(content: str, source_url: str = "") -> tuple[str, list[SurveyQuestion]]:
     """解析问卷星页面 HTML，支持常见单选、多选和填空题。"""
 
@@ -304,6 +389,103 @@ def parse_wjx_html(content: str, source_url: str = "") -> tuple[str, list[Survey
 
     title = parser.title or "问卷星问卷"
     return title, _validate_questions(questions)
+
+
+def _extract_wjx_template_candidates(content: str, base_url: str) -> list[str]:
+    """提取模板页里的问卷预览链接，按页面顺序去重。"""
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(
+        r"""href\s*=\s*["'](?P<href>(?:https?:)?//(?:[^"']+\.)?wjx\.cn/xz/[^"']+|/xz/[^"']+|/vm/[^"']+)["']""",
+        content,
+        re.IGNORECASE,
+    ):
+        href = match.group("href").replace("&amp;", "&")
+        if href.startswith("//"):
+            href = f"https:{href}"
+        resolved = _validate_wjx_url(urljoin(base_url, href))
+        if resolved not in seen:
+            seen.add(resolved)
+            candidates.append(resolved)
+    return candidates
+
+
+def _validate_wenjuan_url(value: str) -> str:
+    """限制模板抓取只访问问卷网公开模板页。"""
+
+    parsed = urlparse(value.strip())
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError("请输入有效的问卷网 http(s) 链接。")
+    if parsed.username or parsed.password:
+        raise ValueError("问卷网链接不能包含账号或密码。")
+    if hostname != "wenjuan.com" and not hostname.endswith(".wenjuan.com"):
+        raise ValueError("目前只支持问卷网或问卷星的公开模板链接。")
+    if not parsed.path.startswith("/lib_detail_full/"):
+        raise ValueError("请输入问卷网公开模板详情页链接。")
+    return parsed.geturl()
+
+
+def _extract_wenjuan_title(content: str) -> str:
+    """从问卷网模板详情页提取标题。"""
+
+    match = re.search(r"<title[^>]*>(.*?)</title>", content, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return "问卷网模板"
+    title = html.unescape(re.sub(r"\s+", " ", match.group(1)).strip())
+    return re.sub(r"\s*-\s*问卷.*$", "", title).strip() or "问卷网模板"
+
+
+def _extract_wenjuan_questions(content: str) -> list[SurveyQuestion]:
+    """解析问卷网 Nuxt 内嵌的真实问卷题目。"""
+
+    questions: list[SurveyQuestion] = []
+    pattern = re.compile(
+        r'desc:"(?P<desc>(?:\\.|[^"\\])*)",option_list:\[(?P<options>.*?)\]',
+        re.DOTALL,
+    )
+    for index, match in enumerate(pattern.finditer(content), 1):
+        question_text = _clean_wenjuan_question(_decode_js_string(match.group("desc")))
+        if not question_text:
+            continue
+        options = [
+            _decode_js_string(option)
+            for option in re.findall(r'"((?:\\.|[^"\\])*)"', match.group("options"))
+        ]
+        options = _unique_strings(
+            [option for option in options if option and option not in {"选项1", "选项 1"}]
+        )
+        question_type = "text" if not options else "single_choice"
+        questions.append(
+            SurveyQuestion(
+                question_id=f"q{index}",
+                text=question_text,
+                question_type=question_type,
+                options=[] if question_type == "text" else options,
+                research_tag="",
+                required=True,
+            )
+        )
+    return questions
+
+
+def _decode_js_string(value: str) -> str:
+    """解码页面脚本里的 JS 字符串转义。"""
+
+    try:
+        return json.loads(f'"{value}"')
+    except json.JSONDecodeError:
+        return value.encode("utf-8", errors="ignore").decode("unicode_escape", errors="ignore")
+
+
+def _clean_wenjuan_question(value: str) -> str:
+    """清理问卷网题干里的题号前缀和空白。"""
+
+    text = html.unescape(value).replace("\xa0", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"^Q\s*\d+\s*[:：]\s*", "", text, flags=re.IGNORECASE)
+    return text.strip()
 
 
 def _validate_wjx_url(value: str) -> str:

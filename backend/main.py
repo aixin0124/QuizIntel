@@ -22,6 +22,7 @@ from .services.analytics_service import (
 )
 from .services.survey_service import (
     build_wrapped_survey,
+    parse_wjx_template_url,
     parse_wjx_url,
     parse_survey_text,
     wrapped_survey_from_dict,
@@ -52,6 +53,12 @@ class ParseRequest(BaseModel):
 
 class WJXParseRequest(BaseModel):
     """问卷星链接导入请求。"""
+
+    url: str
+
+
+class WJXTemplateRequest(BaseModel):
+    """公开模板导入请求。"""
 
     url: str
 
@@ -162,6 +169,25 @@ def parse_wjx_survey(
     return {
         "title": title,
         "source_url": request.url.strip(),
+        "questions": [question.to_dict() for question in questions],
+    }
+
+
+@app.post("/api/surveys/import-template")
+def import_wjx_template(
+    request: WJXTemplateRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """从公开模板页抓取真实问卷并返回可编辑题目。"""
+
+    require_admin(x_admin_token)
+    try:
+        title, source_url, questions = parse_wjx_template_url(request.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"模板导入失败：{exc}") from exc
+    return {
+        "title": title,
+        "source_url": source_url,
         "questions": [question.to_dict() for question in questions],
     }
 
