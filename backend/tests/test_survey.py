@@ -164,7 +164,7 @@ def test_wrap_preserves_research_mapping() -> None:
     assert summary["response_count"] == 1
 
 
-def test_wrap_title_follows_theme_hint() -> None:
+def test_wrap_title_summarizes_packaged_survey() -> None:
     survey = build_wrapped_survey(
         [SurveyQuestion("q1", "价格", options=["100", "200"])],
         "测试",
@@ -172,7 +172,44 @@ def test_wrap_title_follows_theme_hint() -> None:
         llm_service=FakeLLMService(),
     )
     assert survey.theme == "周末旅行决策风格"
-    assert survey.survey_name == "周末旅行决策风格测评"
+    assert survey.survey_name == "周末旅行里的选择剧本"
+    assert survey.survey_name != "周末旅行决策风格测评"
+
+
+def test_finished_survey_title_is_kept_when_not_simple_theme_suffix() -> None:
+    raw = {
+        "survey_name": "周末旅行里的选择剧本",
+        "title_source": "finished_survey",
+        "theme": "周末旅行决策风格",
+        "dimensions": [
+            {"key": "planning", "name": "计划感"},
+            {"key": "spontaneity", "name": "即兴度"},
+        ],
+        "result_types": [
+            {"name": "规划型", "description": "提前安排。"},
+            {"name": "随兴型", "description": "看心情行动。"},
+            {"name": "平衡型", "description": "兼顾效率和惊喜。"},
+            {"name": "探索型", "description": "喜欢新鲜路线。"},
+        ],
+        "questions": [
+            {
+                "question_id": f"iq{index}",
+                "public_text": f"周末出行场景 {index}",
+                "question_type": "single_choice",
+                "options": ["先看攻略", "到现场再说"],
+                "option_scores": {
+                    "先看攻略": {"planning": 0.6, "spontaneity": -0.3},
+                    "到现场再说": {"planning": -0.4, "spontaneity": 0.7},
+                },
+                "dimension_weights": {"planning": 1.0, "spontaneity": 1.0},
+            }
+            for index in range(1, MIN_GENERATED_QUESTIONS + 1)
+        ],
+    }
+
+    survey = _normalize_wrapped_survey(raw, [], "测试", "周末旅行决策风格")
+
+    assert survey.survey_name == "周末旅行里的选择剧本"
 
 
 def test_wrap_keeps_original_options_and_falls_back_for_missing_questions() -> None:

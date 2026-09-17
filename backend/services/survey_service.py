@@ -671,8 +671,35 @@ def _generate_staged_survey(
         except RuntimeError as exc:
             raise RuntimeError(f"互动题补生成阶段失败：{exc}") from exc
 
+    title_result: dict[str, Any] = {}
+    try:
+        title_result = service.generate_json(
+            _title_system_prompt(),
+            json.dumps(
+                {
+                    "brand_goal": brand_goal,
+                    "theme_hint": theme_hint,
+                    "packaged_survey": {
+                        "theme": blueprint.get("theme"),
+                        "tagline": blueprint.get("tagline"),
+                        "intro": blueprint.get("intro"),
+                        "analysis_method": blueprint.get("analysis_method"),
+                        "dimensions": dimensions,
+                        "result_types": blueprint.get("result_types", []),
+                        "questions": question_result.get("questions", []),
+                    },
+                    "required_output": _title_schema(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+    except RuntimeError:
+        title_result = {}
+
     return {
-        "survey_name": blueprint.get("survey_name"),
+        "survey_name": title_result.get("survey_name") or blueprint.get("survey_name"),
+        "title_source": "finished_survey" if title_result.get("survey_name") else "",
         "theme": blueprint.get("theme"),
         "tagline": blueprint.get("tagline"),
         "intro": blueprint.get("intro"),
@@ -728,7 +755,8 @@ def _system_prompt() -> str:
         "导入的原始题目和选项只是研究参考，可以被合并、拆分、舍弃或转化，"
         "生成题目数量不需要与原题一致。"
         "survey_name 和 theme 必须围绕用户提供的 theme_hint 生成，不能改成无关主题；"
-        "survey_name 应直接体现 theme_hint，优先使用“主题 + 测评”的清晰标题。"
+        "survey_name 必须在你完成整份问卷包装后，总结题面、维度、结果画像和副标题来命名，"
+        "不要简单使用“主题 + 测评/测试/问卷”的生硬标题。"
         "\n\n"
         "通用设计原则："
         "\n1. 主题优先：先定义主题真正要测的行为维度，再写题目。"
@@ -773,7 +801,7 @@ def _blueprint_system_prompt() -> str:
     return (
         "你是专业的主题测评策划师。请先为用户指定主题建立一个通用、非临床的分析蓝图，"
         "不要复述原始问卷。根据主题选择 3 至 5 个真正相关的行为维度，并生成 4 个互相区分的结果画像。"
-        "survey_name 和 theme 必须与 theme_hint 保持一致，survey_name 应直接使用 theme_hint 作为标题核心。"
+        "theme 必须与 theme_hint 保持一致；survey_name 只是标题草案，不能简单写成“主题 + 测评/测试/问卷”。"
         "原始题目只作为市场研究参考。只输出合法 JSON。"
         "dimensions 的每个字段保持简短；result_types 必须恰好 4 个，且每个都必须有"
         "覆盖全部 dimension key 的 dimension_profile，取值 -1 到 1；4 个画像的维度坐标"
@@ -805,9 +833,21 @@ def _question_system_prompt() -> str:
     )
 
 
+def _title_system_prompt() -> str:
+    return (
+        "你是互动测评的命名编辑。请根据已经包装完成的问卷内容生成最终标题。"
+        "标题要总结题面场景、分析维度、结果画像和副标题呈现出的整体体验，"
+        "而不是机械复述 theme_hint。"
+        "要求：1. 8 到 18 个中文字符左右；2. 自然、有记忆点，适合作为答题页主标题；"
+        "3. 保持主题相关，但不要简单写成“主题 + 测评/测试/问卷”；"
+        "4. 不要提前泄露具体结果类型，不要出现动物、星座、职业或角色等结果名称；"
+        "5. 只输出合法 JSON。"
+    )
+
+
 def _output_schema() -> dict[str, Any]:
     return {
-        "survey_name": "测评名称",
+        "survey_name": "根据成品问卷总结出的自然标题，不要主题+测评",
         "theme": "主题名称",
         "tagline": "一句吸引人的副标题",
         "intro": "测评介绍",
@@ -904,6 +944,10 @@ def _question_schema() -> dict[str, Any]:
     }
 
 
+def _title_schema() -> dict[str, Any]:
+    return {"survey_name": "根据成品问卷总结出的最终标题"}
+
+
 def _normalize_wrapped_survey(
     raw: dict[str, Any],
     originals: list[SurveyQuestion],
@@ -985,7 +1029,13 @@ def _normalize_wrapped_survey(
         raise ValueError("模型生成的结果画像不足 4 个，请重试生成以保证结果区分度。")
 
     return WrappedSurvey(
-        survey_name=_build_survey_title(theme_hint),
+        survey_name=_resolve_survey_title(
+            raw,
+            theme_hint,
+            wrapped_questions,
+            result_types,
+            dimensions,
+        ),
         theme=_clean_theme_hint(theme_hint),
         tagline=str(raw.get("tagline") or "花一分钟，看看你是哪一型"),
         intro=str(raw.get("intro") or "根据你的选择生成一个轻量趣味结果。"),
@@ -1034,8 +1084,17 @@ def _normalize_legacy_wrapped_survey(
                 research_refs=[original.question_id],
             )
         )
+    result_types = _normalize_result_types(raw.get("result_types", [])) or [
+        {"name": "探索型", "description": "你愿意尝试新鲜事物。"}
+    ]
     return WrappedSurvey(
-        survey_name=_build_survey_title(theme_hint),
+        survey_name=_resolve_survey_title(
+            raw,
+            theme_hint,
+            wrapped_questions,
+            result_types,
+            [],
+        ),
         theme=_clean_theme_hint(theme_hint),
         tagline=str(raw.get("tagline") or "花一分钟，看看你是哪一型"),
         intro=str(raw.get("intro") or "根据你的选择生成一个轻量趣味结果。"),
@@ -1043,8 +1102,7 @@ def _normalize_legacy_wrapped_survey(
             raw.get("disclosure")
             or "本测评仅供娱乐，部分题目用于市场研究，结果不构成心理或医学判断。"
         ),
-        result_types=_normalize_result_types(raw.get("result_types", []))
-        or [{"name": "探索型", "description": "你愿意尝试新鲜事物。"}],
+        result_types=result_types,
         questions=wrapped_questions,
         brand_goal=brand_goal,
         source="llm",
@@ -1058,15 +1116,141 @@ def _clean_theme_hint(theme_hint: str) -> str:
     return " ".join(theme_hint.split()).strip("。.!！?？")
 
 
-def _build_survey_title(theme_hint: str) -> str:
-    """用用户主题生成稳定标题，避免模型标题偏离包装方向。"""
+def _resolve_survey_title(
+    raw: dict[str, Any],
+    theme_hint: str,
+    questions: list[WrappedQuestion],
+    result_types: list[dict[str, Any]],
+    dimensions: list[dict[str, Any]],
+) -> str:
+    """优先使用成品问卷标题，退化时再根据内容兜底命名。"""
+
+    theme = _clean_theme_hint(theme_hint)
+    raw_title = _clean_title(raw.get("survey_name", ""))
+    trusted_finished_title = raw.get("title_source") == "finished_survey"
+    if _is_usable_survey_title(raw_title, theme, trusted_finished_title):
+        return raw_title
+    return _build_survey_title(theme_hint, questions, result_types, dimensions)
+
+
+def _build_survey_title(
+    theme_hint: str,
+    questions: list[WrappedQuestion] | None = None,
+    result_types: list[dict[str, Any]] | None = None,
+    dimensions: list[dict[str, Any]] | None = None,
+) -> str:
+    """根据已经包装好的问卷内容生成稳定标题兜底。"""
 
     theme = _clean_theme_hint(theme_hint)
     if not theme:
         return "趣味测评"
-    if theme.endswith(("测评", "问卷", "测试")):
-        return theme
-    return f"{theme}测评"
+    subject = _title_subject_from_theme(theme)
+    cue = _title_cue(theme, questions or [], result_types or [], dimensions or [])
+    if subject and subject not in cue:
+        return f"{subject}里的{cue}"
+    return cue
+
+
+def _clean_title(value: Any) -> str:
+    """清理模型返回的标题，避免带引号、句号或换行说明。"""
+
+    title = " ".join(str(value or "").split()).strip("「」《》\"'。.!！?？")
+    return title[:32]
+
+
+def _is_usable_survey_title(title: str, theme: str, allow_loose: bool = False) -> bool:
+    """过滤空标题、占位标题和“主题+测评”式标题。"""
+
+    if not title:
+        return False
+    if title in {"测评名称", "主题名称", "趣味测评", "心理测评", "人格测评"}:
+        return False
+    if _is_simple_theme_title(title, theme):
+        return False
+    if allow_loose:
+        return True
+    return _title_overlaps_theme(title, theme)
+
+
+def _is_simple_theme_title(title: str, theme: str) -> bool:
+    compact_title = re.sub(r"\s+", "", title)
+    compact_theme = re.sub(r"\s+", "", theme)
+    if not compact_theme:
+        return False
+    if compact_title == compact_theme:
+        return True
+    return compact_title in {
+        f"{compact_theme}测评",
+        f"{compact_theme}测试",
+        f"{compact_theme}问卷",
+        f"趣味{compact_theme}测评",
+        f"{compact_theme}趣味测评",
+    }
+
+
+def _title_overlaps_theme(title: str, theme: str) -> bool:
+    theme_chars = {
+        char
+        for char in theme
+        if char.strip() and char not in "的了和与及或之"
+    }
+    if not theme_chars:
+        return True
+    return any(char in title for char in theme_chars)
+
+
+def _title_subject_from_theme(theme: str) -> str:
+    subject = theme
+    for suffix in (
+        "决策风格",
+        "消费人格",
+        "人格",
+        "偏好",
+        "风格",
+        "类型",
+        "测评",
+        "测试",
+        "问卷",
+    ):
+        if subject.endswith(suffix) and len(subject) > len(suffix):
+            subject = subject[: -len(suffix)]
+            break
+    return subject.strip("的 -_")
+
+
+def _title_cue(
+    theme: str,
+    questions: list[WrappedQuestion],
+    result_types: list[dict[str, Any]],
+    dimensions: list[dict[str, Any]],
+) -> str:
+    material = " ".join(
+        [
+            theme,
+            *[
+                str(item.get("name", "")) + str(item.get("description", ""))
+                for item in dimensions
+            ],
+            *[question.public_text for question in questions[:4]],
+            *[
+                str(item.get("personality_reference") or item.get("name") or "")
+                for item in result_types[:4]
+            ],
+        ]
+    )
+    if any(word in material for word in ("恋爱", "关系", "亲密", "沟通", "边界")):
+        return "相处剧本"
+    if any(word in material for word in ("旅行", "周末", "出行", "路线")):
+        return "选择剧本"
+    if any(word in material for word in ("消费", "购买", "购物", "价格", "品牌")):
+        return "偏好地图"
+    if any(word in material for word in ("职场", "协作", "反馈", "团队")):
+        return "协作画像"
+    if any(word in material for word in ("决策", "取舍", "选择")):
+        return "选择剧本"
+    if "行动" in material:
+        return "行动画像"
+    return "偏好画像"
 
 
 def _string_list(value: Any) -> list[str]:
