@@ -46,7 +46,7 @@ const fallbackHeadlines = [
   "系统正在校验题目映射，避免分析维度和原始问卷脱节。",
 ];
 
-const headlinesPerGeneration = 3;
+const maxHeadlinesPerGeneration = 30;
 const seenHeadlinesStorageKey = "fun_research_seen_headlines";
 const headlineApiUrl = "https://api.zxki.cn/api/jhrs?type=douyin";
 
@@ -299,11 +299,12 @@ function selectHeadlineBatch(items: string[], seen: Set<string>): string[] {
     seen.clear();
     freshItems = uniqueItems;
   }
-  const selected = shuffle(freshItems).slice(0, headlinesPerGeneration);
+  const batchSize = Math.min(maxHeadlinesPerGeneration, uniqueItems.length);
+  const selected = shuffle(freshItems).slice(0, batchSize);
   selected.forEach((item) => seen.add(item));
-  if (selected.length < headlinesPerGeneration) {
+  if (selected.length < batchSize) {
     const remaining = shuffle(uniqueItems.filter((item) => !selected.includes(item)));
-    selected.push(...remaining.slice(0, headlinesPerGeneration - selected.length));
+    selected.push(...remaining.slice(0, batchSize - selected.length));
   }
   return selected;
 }
