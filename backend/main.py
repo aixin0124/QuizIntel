@@ -87,6 +87,9 @@ def health() -> dict[str, Any]:
         "llm_model": settings.llm_model,
         "llm_wire_api": settings.llm_wire_api,
         "llm_reasoning_effort": settings.llm_reasoning_effort,
+        "llm_fallback_configured": settings.has_llm_fallback,
+        "llm_fallback_base_url": settings.llm_fallback_base_url,
+        "llm_fallback_model": settings.llm_fallback_model,
     }
 
 

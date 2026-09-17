@@ -19,24 +19,52 @@ class LLMService:
         if not settings.has_llm:
             raise RuntimeError("未配置 LLM_API_KEY 或可用的模型服务")
 
-        if settings.llm_wire_api in {"responses", "response"}:
-            content = self._generate_with_responses(system_prompt, user_prompt)
-        elif settings.llm_wire_api in {"chat", "chat_completions", "completions"}:
-            content = self._generate_with_chat_completions(
-                system_prompt, user_prompt
-            )
-        else:
-            raise RuntimeError(
-                f"不支持的模型协议：{settings.llm_wire_api}。"
-                "可选值为 responses 或 chat_completions。"
-            )
+        try:
+            content = self._generate_with_primary(system_prompt, user_prompt)
+        except Exception as primary_exc:
+            if not settings.has_llm_fallback:
+                raise
+            try:
+                content = self._generate_with_chat_completions(
+                    system_prompt,
+                    user_prompt,
+                    api_key=settings.llm_fallback_api_key,
+                    base_url=settings.llm_fallback_base_url,
+                    model=settings.llm_fallback_model,
+                )
+            except Exception as fallback_exc:
+                raise RuntimeError(
+                    "主模型调用失败，基元律动兜底接口也调用失败："
+                    f"主模型错误：{primary_exc}；"
+                    f"基元律动错误：{fallback_exc}"
+                ) from fallback_exc
         return _parse_json_object(str(content))
 
-    def _generate_with_responses(self, system_prompt: str, user_prompt: str) -> str:
+    def _generate_with_primary(self, system_prompt: str, user_prompt: str) -> str:
+        """按主配置调用模型。"""
+
+        if settings.llm_wire_api in {"responses", "response"}:
+            return self._generate_with_responses(system_prompt, user_prompt)
+        if settings.llm_wire_api in {"chat", "chat_completions", "completions"}:
+            return self._generate_with_chat_completions(system_prompt, user_prompt)
+        raise RuntimeError(
+            f"不支持的模型协议：{settings.llm_wire_api}。"
+            "可选值为 responses 或 chat_completions。"
+        )
+
+    def _generate_with_responses(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+    ) -> str:
         """调用 OpenAI Responses API。"""
 
         request_body: dict[str, Any] = {
-            "model": settings.llm_model,
+            "model": model or settings.llm_model,
             "instructions": system_prompt,
             "input": user_prompt,
             "store": False,
@@ -44,18 +72,29 @@ class LLMService:
         }
         if settings.llm_reasoning_effort:
             request_body["reasoning"] = {"effort": settings.llm_reasoning_effort}
-        data = self._post_json("/responses", request_body)
+        data = self._post_json(
+            "/responses",
+            request_body,
+            api_key=api_key,
+            base_url=base_url,
+        )
         return _extract_response_text(data)
 
     def _generate_with_chat_completions(
-        self, system_prompt: str, user_prompt: str
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
     ) -> str:
         """兼容本地模型和旧版 OpenAI 兼容服务。"""
 
         data = self._post_json(
             "/chat/completions",
             {
-                "model": settings.llm_model,
+                "model": model or settings.llm_model,
                 "temperature": 0.75,
                 "max_tokens": settings.llm_max_output_tokens,
                 "messages": [
@@ -63,6 +102,8 @@ class LLMService:
                     {"role": "user", "content": user_prompt},
                 ],
             },
+            api_key=api_key,
+            base_url=base_url,
         )
         try:
             content = data["choices"][0]["message"]["content"]
@@ -74,13 +115,22 @@ class LLMService:
             content = "".join(str(part.get("text", "")) for part in content)
         return str(content)
 
-    def _post_json(self, path: str, request_body: dict[str, Any]) -> dict[str, Any]:
+    def _post_json(
+        self,
+        path: str,
+        request_body: dict[str, Any],
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> dict[str, Any]:
         """发送请求，并在代理不接受 reasoning 参数时做一次兼容重试。"""
 
         headers = {"Content-Type": "application/json"}
-        if settings.llm_api_key:
-            headers["Authorization"] = f"Bearer {settings.llm_api_key}"
-        url = _build_endpoint_url(settings.llm_base_url, path)
+        request_api_key = api_key if api_key is not None else settings.llm_api_key
+        request_base_url = base_url or settings.llm_base_url
+        if request_api_key:
+            headers["Authorization"] = f"Bearer {request_api_key}"
+        url = _build_endpoint_url(request_base_url, path)
         response: requests.Response | None = None
         try:
             response = requests.post(

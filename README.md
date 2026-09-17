@@ -45,6 +45,11 @@ LLM_MODEL=你的模型名称
 LLM_WIRE_API=chat_completions
 LLM_REASONING_EFFORT=low
 LLM_MAX_OUTPUT_TOKENS=6000
+
+# 可选：基元律动兜底接口，主接口失败时使用
+LLM_FALLBACK_API_KEY=你的基元律动密钥
+LLM_FALLBACK_BASE_URL=https://tokenrhythm.studio/v1
+LLM_FALLBACK_MODEL=deepseek-v4-flash
 ```
 
 项目运行时始终调用真实大模型 API。`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 任意一项为空或仍为占位文字时，启动脚本会停止并提示配置错误。
@@ -55,6 +60,8 @@ LLM_MAX_OUTPUT_TOKENS=6000
 - `LLM_WIRE_API=chat_completions`
 
 当前 `.env.example` 按 `https://www.blackaicoding.com` 这类兼容网关配置为 `chat_completions`。这类网关通常使用 `/v1/chat/completions`，项目会在填写根域名时自动补上 `/v1`。如果你使用的服务明确支持 Responses API，再改为 `LLM_WIRE_API=responses`。
+
+如果配置了 `LLM_FALLBACK_API_KEY`，主模型接口调用失败时会自动改用基元律动兜底接口。基元律动按 Chat Completions 协议调用，接口地址为 `https://tokenrhythm.studio/v1/chat/completions`，默认兜底模型为 `deepseek-v4-flash`。
 
 `.env` 已被 `.gitignore` 忽略，不要把真实密钥提交到 Git 仓库。如果密钥曾经出现在公开仓库或聊天记录中，应先轮换密钥再继续使用。
 

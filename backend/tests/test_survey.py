@@ -1,6 +1,11 @@
 """问卷包装模块的基础测试。"""
 
+from types import SimpleNamespace
+
+import requests
+
 from backend.models import SurveyQuestion
+from backend.services import llm_service as llm_module
 from backend.services.analytics_service import (
     build_research_analysis,
     build_response,
@@ -360,3 +365,57 @@ def test_database_trash_restore_and_permanent_delete(tmp_path) -> None:
     assert database.permanently_delete_survey(survey_id) is True
     assert database.get_survey(survey_id) is None
     assert database.list_responses(survey_id) == []
+
+
+def test_llm_service_falls_back_to_tokenrhythm(monkeypatch) -> None:
+    """主 gpt-5.5 接口失败时应切到基元律动 Chat Completions。"""
+
+    fake_settings = SimpleNamespace(
+        has_llm=True,
+        has_llm_fallback=True,
+        llm_api_key="primary-key",
+        llm_base_url="https://primary.example",
+        llm_model="gpt-5.5",
+        llm_wire_api="chat_completions",
+        llm_reasoning_effort="low",
+        llm_max_output_tokens=6000,
+        llm_fallback_api_key="fallback-key",
+        llm_fallback_base_url="https://tokenrhythm.studio/v1",
+        llm_fallback_model="deepseek-v4-flash",
+        request_timeout=3,
+    )
+    monkeypatch.setattr(llm_module, "settings", fake_settings)
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code: int, payload: dict | None = None) -> None:
+            self.status_code = status_code
+            self._payload = payload or {}
+            self.text = ""
+
+        def raise_for_status(self) -> None:
+            if self.status_code >= 400:
+                raise requests.HTTPError("failed")
+
+        def json(self) -> dict:
+            return self._payload
+
+    def fake_post(url: str, **kwargs):
+        calls.append({"url": url, **kwargs})
+        if len(calls) == 1:
+            return FakeResponse(503, {"error": {"message": "primary unavailable"}})
+        return FakeResponse(
+            200,
+            {"choices": [{"message": {"content": "{\"ok\": true}"}}]},
+        )
+
+    monkeypatch.setattr(llm_module.requests, "post", fake_post)
+
+    result = llm_module.LLMService().generate_json("system", "user")
+
+    assert result == {"ok": True}
+    assert calls[0]["url"] == "https://primary.example/v1/chat/completions"
+    assert calls[0]["headers"]["Authorization"] == "Bearer primary-key"
+    assert calls[1]["url"] == "https://tokenrhythm.studio/v1/chat/completions"
+    assert calls[1]["headers"]["Authorization"] == "Bearer fallback-key"
+    assert calls[1]["json"]["model"] == "deepseek-v4-flash"
