@@ -19,6 +19,7 @@ from backend.storage.database import ResearchDatabase
 from backend.services.survey_service import (
     MIN_GENERATED_QUESTIONS,
     _normalize_wrapped_survey,
+    _validate_wenjuan_url,
     _validate_wjx_url,
     build_wrapped_survey,
     parse_survey_text,
@@ -114,6 +115,14 @@ def test_parse_wjx_rejects_non_wjx_url() -> None:
         assert "问卷星域名" in str(exc)
     else:
         raise AssertionError("非问卷星链接应被拒绝")
+
+
+def test_import_links_accept_common_bare_domains() -> None:
+    assert _validate_wjx_url("v.wjx.cn/vm/example.aspx") == "https://v.wjx.cn/vm/example.aspx"
+    assert (
+        _validate_wenjuan_url("www.wenjuan.com/lib_detail_full/example/")
+        == "https://www.wenjuan.com/lib_detail_full/example/"
+    )
 
 
 def test_parse_wjx_unavailable_page_has_clear_error() -> None:

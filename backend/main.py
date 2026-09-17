@@ -52,7 +52,7 @@ class ParseRequest(BaseModel):
 
 
 class WJXParseRequest(BaseModel):
-    """问卷星链接导入请求。"""
+    """公开问卷链接导入请求。"""
 
     url: str
 
@@ -159,16 +159,16 @@ def parse_wjx_survey(
     request: WJXParseRequest,
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    """读取问卷星公开转发链接并返回可编辑题目。"""
+    """读取问卷星或公开模板链接并返回可编辑题目。"""
 
     require_admin(x_admin_token)
     try:
-        title, questions = parse_wjx_url(request.url)
+        title, source_url, questions = parse_wjx_template_url(request.url)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"问卷星导入失败：{exc}") from exc
+        raise HTTPException(status_code=400, detail=f"公开问卷导入失败：{exc}") from exc
     return {
         "title": title,
-        "source_url": request.url.strip(),
+        "source_url": source_url,
         "questions": [question.to_dict() for question in questions],
     }
 

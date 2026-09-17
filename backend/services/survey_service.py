@@ -268,7 +268,9 @@ def parse_wjx_url(url: str) -> tuple[str, list[SurveyQuestion]]:
 def parse_wjx_template_url(url: str) -> tuple[str, str, list[SurveyQuestion]]:
     """从支持的公开模板页抓取一份真实问卷，并转换为统一题目结构。"""
 
-    parsed_template_url = urlparse(url.strip())
+    parsed_template_url = urlparse(
+        _add_default_https(url, ("wenjuan.com", "wjx.cn"))
+    )
     if parsed_template_url.hostname and parsed_template_url.hostname.lower().rstrip(".").endswith("wenjuan.com"):
         return parse_wenjuan_template_url(url)
 
@@ -414,7 +416,7 @@ def _extract_wjx_template_candidates(content: str, base_url: str) -> list[str]:
 def _validate_wenjuan_url(value: str) -> str:
     """限制模板抓取只访问问卷网公开模板页。"""
 
-    parsed = urlparse(value.strip())
+    parsed = urlparse(_add_default_https(value, ("wenjuan.com",)))
     hostname = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme not in {"http", "https"} or not hostname:
         raise ValueError("请输入有效的问卷网 http(s) 链接。")
@@ -491,7 +493,7 @@ def _clean_wenjuan_question(value: str) -> str:
 def _validate_wjx_url(value: str) -> str:
     """限制链接只能访问问卷星域名，避免把解析接口变成任意地址抓取器。"""
 
-    parsed = urlparse(value.strip())
+    parsed = urlparse(_add_default_https(value, ("wjx.cn",)))
     hostname = (parsed.hostname or "").lower().rstrip(".")
     if parsed.scheme not in {"http", "https"} or not hostname:
         raise ValueError("请输入有效的问卷星 http(s) 链接。")
@@ -500,6 +502,18 @@ def _validate_wjx_url(value: str) -> str:
     if not (hostname == "wjx.cn" or hostname.endswith(".wjx.cn")):
         raise ValueError("目前只支持问卷星域名的链接，例如 v.wjx.cn/vm/xxx.aspx。")
     return parsed.geturl()
+
+
+def _add_default_https(value: str, allowed_domains: tuple[str, ...]) -> str:
+    """给常见裸域名链接补全协议，兼容直接粘贴的分享链接。"""
+
+    text = value.strip()
+    if re.match(r"^[a-z][a-z0-9+.-]*://", text, re.IGNORECASE):
+        return text
+    for domain in allowed_domains:
+        if re.match(rf"^(?:[\w-]+\.)?{re.escape(domain)}(?:[/?#]|$)", text, re.IGNORECASE):
+            return f"https://{text}"
+    return text
 
 
 def _wjx_question_type(field: dict[str, Any]) -> str:
