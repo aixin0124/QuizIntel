@@ -46,6 +46,8 @@ const fallbackHeadlines = [
   "系统正在校验题目映射，避免分析维度和原始问卷脱节。",
 ];
 
+const headlinesPerGeneration = 3;
+const seenHeadlinesStorageKey = "fun_research_seen_headlines";
 const headlineApiUrl = "https://api.zxki.cn/api/jhrs?type=douyin";
 
 function App() {
@@ -142,11 +144,14 @@ function GenerationOverlay({ visible }: { visible: boolean }) {
   const [headlines, setHeadlines] = useState(fallbackHeadlines);
   const [headlineIndex, setHeadlineIndex] = useState(0);
   const headlinesRef = useRef(fallbackHeadlines);
+  const seenHeadlinesRef = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     if (!visible) return;
     setElapsedSeconds(0);
     setActiveStep(0);
+    headlinesRef.current = fallbackHeadlines;
+    setHeadlines(fallbackHeadlines);
     setHeadlineIndex(0);
     const startedAt = Date.now();
     const timer = window.setInterval(() => {
@@ -158,11 +163,17 @@ function GenerationOverlay({ visible }: { visible: boolean }) {
     const controller = new AbortController();
     void loadHeadlines(controller.signal).then((items) => {
       if (!items.length) return;
-      headlinesRef.current = items;
-      setHeadlines(items);
+      const seenHeadlines = seenHeadlinesRef.current ??= loadSeenHeadlines();
+      const selectedHeadlines = selectHeadlineBatch(items, seenHeadlines);
+      if (!selectedHeadlines.length) return;
+      saveSeenHeadlines(seenHeadlines);
+      headlinesRef.current = selectedHeadlines;
+      setHeadlines(selectedHeadlines);
       setHeadlineIndex(0);
     }).catch(() => {
       headlinesRef.current = fallbackHeadlines;
+      setHeadlines(fallbackHeadlines);
+      setHeadlineIndex(0);
     });
 
     return () => {
@@ -205,41 +216,105 @@ function formatElapsed(seconds: number) {
 }
 
 async function loadHeadlines(signal: AbortSignal): Promise<string[]> {
+  const cacheBust = Date.now().toString();
   try {
-    const proxyResponse = await fetch("/api/headlines", { signal, headers: { Accept: "application/json" } });
+    const proxyResponse = await fetch(`/api/headlines?request_id=${cacheBust}`, {
+      signal,
+      cache: "no-store",
+      headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    });
     if (proxyResponse.ok) return normalizeHeadlines(await proxyResponse.json() as unknown);
   } catch {
     // 代理不可用时继续尝试浏览器直连。
   }
-  const response = await fetch(headlineApiUrl, { signal, headers: { Accept: "application/json" } });
+  const directUrl = `${headlineApiUrl}&request_id=${cacheBust}`;
+  const response = await fetch(directUrl, {
+    signal,
+    cache: "no-store",
+    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+  });
   if (!response.ok) throw new Error(`头条接口请求失败（HTTP ${response.status}）`);
   const contentType = response.headers.get("content-type") || "";
-  const payload = contentType.includes("json") ? await response.json() as unknown : await response.text();
+  const rawPayload = contentType.includes("json") ? await response.json() as unknown : await response.text();
+  const payload = typeof rawPayload === "string" ? parseHeadlineJson(rawPayload) : rawPayload;
   return normalizeHeadlines(payload);
 }
 
 function normalizeHeadlines(payload: unknown): string[] {
   const titles: string[] = [];
   const visit = (value: unknown) => {
-    if (typeof value === "string") {
-      const text = value.replace(/\s+/g, " ").trim();
-      if (text.length >= 6 && text.length <= 160) titles.push(text);
-      return;
-    }
     if (Array.isArray(value)) {
       value.forEach(visit);
       return;
     }
     if (!value || typeof value !== "object") return;
     const record = value as Record<string, unknown>;
-    const title = record.title ?? record.name ?? record.text ?? record.content ?? record.desc;
-    if (typeof title === "string") visit(title);
+    if (typeof record.title === "string") {
+      const title = record.title.replace(/\s+/g, " ").trim();
+      if (title.length >= 6 && title.length <= 160) titles.push(title);
+    }
     Object.entries(record).forEach(([key, item]) => {
-      if (!["title", "name", "text", "content", "desc"].includes(key)) visit(item);
+      if (key !== "title" && (Array.isArray(item) || Boolean(item && typeof item === "object"))) {
+        visit(item);
+      }
     });
   };
   visit(payload);
-  return Array.from(new Set(titles)).slice(0, 20);
+  return Array.from(new Set(titles));
+}
+
+function parseHeadlineJson(payload: string): unknown {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
+function loadSeenHeadlines(): Set<string> {
+  try {
+    const stored = sessionStorage.getItem(seenHeadlinesStorageKey);
+    const parsed = stored ? JSON.parse(stored) : [];
+    return Array.isArray(parsed)
+      ? new Set(parsed.filter((item): item is string => typeof item === "string"))
+      : new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function saveSeenHeadlines(seen: Set<string>) {
+  try {
+    sessionStorage.setItem(seenHeadlinesStorageKey, JSON.stringify(Array.from(seen)));
+  } catch {
+    // 浏览器禁止会话存储时，仍保留当前页面内的去重记录。
+  }
+}
+
+function selectHeadlineBatch(items: string[], seen: Set<string>): string[] {
+  const uniqueItems = Array.from(new Set(items));
+  if (!uniqueItems.length) return [];
+  let freshItems = uniqueItems.filter((item) => !seen.has(item));
+  if (!freshItems.length) {
+    seen.clear();
+    freshItems = uniqueItems;
+  }
+  const selected = shuffle(freshItems).slice(0, headlinesPerGeneration);
+  selected.forEach((item) => seen.add(item));
+  if (selected.length < headlinesPerGeneration) {
+    const remaining = shuffle(uniqueItems.filter((item) => !selected.includes(item)));
+    selected.push(...remaining.slice(0, headlinesPerGeneration - selected.length));
+  }
+  return selected;
+}
+
+function shuffle<T>(items: T[]): T[] {
+  const result = items.slice();
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [result[index], result[randomIndex]] = [result[randomIndex], result[index]];
+  }
+  return result;
 }
 
 function Dashboard({ survey, summary, surveyCount, loading, token, selectedId, status, finishing, onFinish }: { survey: WrappedSurvey | null; summary: AnalyticsSummary | null; surveyCount: number; loading: boolean; token: string; selectedId: number | null; status: "open" | "ended"; finishing: boolean; onFinish: () => void }) {

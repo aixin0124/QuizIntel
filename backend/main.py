@@ -9,7 +9,7 @@ from typing import Any
 import requests
 from fastapi import FastAPI, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .config import settings
@@ -104,9 +104,15 @@ def get_headlines() -> Any:
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"头条接口暂时不可用：{exc}") from exc
     try:
-        return response.json()
+        return JSONResponse(
+            content=response.json(),
+            headers={"Cache-Control": "no-store"},
+        )
     except ValueError:
-        return {"data": response.text}
+        return JSONResponse(
+            content={"data": response.text},
+            headers={"Cache-Control": "no-store"},
+        )
 
 
 @app.post("/api/admin/login")
