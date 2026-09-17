@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 from html.parser import HTMLParser
 from typing import Any
@@ -490,25 +491,14 @@ def _generate_staged_survey(
 def wrapped_survey_from_dict(payload: dict[str, Any]) -> WrappedSurvey:
     """从数据库 JSON 恢复包装方案。"""
 
+    dimensions = _normalize_dimensions(payload.get("dimensions", []))
     return WrappedSurvey(
         survey_name=str(payload["survey_name"]),
         theme=str(payload["theme"]),
         tagline=str(payload["tagline"]),
         intro=str(payload["intro"]),
         disclosure=str(payload["disclosure"]),
-        result_types=[
-            {
-                "name": str(item.get("name", "")),
-                "description": str(item.get("description", "")),
-                "dimension_profile": _normalize_number_map(
-                    item.get("dimension_profile", {})
-                ),
-                "strengths": _string_list(item.get("strengths", [])),
-                "watchouts": _string_list(item.get("watchouts", [])),
-                "advice": str(item.get("advice", "")),
-            }
-            for item in payload.get("result_types", [])
-        ],
+        result_types=_normalize_result_types(payload.get("result_types", []), dimensions),
         questions=[
             WrappedQuestion(
                 question_id=str(item["question_id"]),
@@ -529,7 +519,7 @@ def wrapped_survey_from_dict(payload: dict[str, Any]) -> WrappedSurvey:
         ],
         brand_goal=str(payload.get("brand_goal", "")),
         source=str(payload.get("source", "llm")),
-        dimensions=_normalize_dimensions(payload.get("dimensions", [])),
+        dimensions=dimensions,
         analysis_method=str(payload.get("analysis_method", "")),
     )
 
@@ -586,7 +576,9 @@ def _blueprint_system_prompt() -> str:
         "不要复述原始问卷。根据主题选择 3 至 5 个真正相关的行为维度，并生成 4 个互相区分的结果画像。"
         "survey_name 和 theme 必须与 theme_hint 保持一致，survey_name 应直接使用 theme_hint 作为标题核心。"
         "原始题目只作为市场研究参考。只输出合法 JSON。"
-        "dimensions 的每个字段保持简短；result_types 的 description 不超过 80 字，"
+        "dimensions 的每个字段保持简短；result_types 必须恰好 4 个，且每个都必须有"
+        "覆盖全部 dimension key 的 dimension_profile，取值 -1 到 1；4 个画像的维度坐标"
+        "要明显拉开，不能集中在同一个象限。description 不超过 80 字，"
         "strengths 和 watchouts 各 1 至 2 条，advice 不超过 50 字。"
         "如果结果是动物、星座、职业或角色，具体结果名称只保留在 result_types 中，"
         "不要放进 survey_name、theme、tagline、intro 或 analysis_method；"
@@ -784,6 +776,9 @@ def _normalize_wrapped_survey(
             f"模型生成的互动题目不足 {MIN_GENERATED_QUESTIONS} 道，"
             "请重试生成，以保证人格维度有足够的交叉题目。"
         )
+    result_types = _normalize_result_types(raw.get("result_types", []), dimensions)
+    if len(result_types) < 4:
+        raise ValueError("模型生成的结果画像不足 4 个，请重试生成以保证结果区分度。")
 
     return WrappedSurvey(
         survey_name=_build_survey_title(theme_hint),
@@ -794,8 +789,7 @@ def _normalize_wrapped_survey(
             raw.get("disclosure")
             or "本测评仅供娱乐，部分题目用于市场研究，结果不构成心理或医学判断。"
         ),
-        result_types=_normalize_result_types(raw.get("result_types", []))
-        or [{"name": "探索型", "description": "你愿意尝试新鲜事物。"}],
+        result_types=result_types,
         questions=wrapped_questions,
         brand_goal=brand_goal,
         source="llm",
@@ -933,28 +927,120 @@ def _normalize_dimensions(value: Any) -> list[dict[str, Any]]:
     return dimensions
 
 
-def _normalize_result_types(value: Any) -> list[dict[str, Any]]:
-    """统一结果类型结构，兼容旧模型只返回名称和描述的情况。"""
+def _normalize_result_types(
+    value: Any,
+    dimensions: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """统一结果类型结构，并保证新问卷每个人格都有可区分的维度坐标。"""
 
     if not isinstance(value, list):
         return []
     result_types: list[dict[str, Any]] = []
-    for item in value:
+    dimension_keys = [
+        str(item.get("key"))
+        for item in dimensions or []
+        if item.get("key")
+    ]
+    for index, item in enumerate(value):
         if not isinstance(item, dict):
             continue
+        profile = _normalize_number_map(item.get("dimension_profile", {}))
+        if dimension_keys:
+            fallback_profile = _fallback_dimension_profile(
+                index, max(len(value), 1), dimension_keys
+            )
+            profile = {
+                key: profile.get(key, fallback_profile[key])
+                for key in dimension_keys
+            }
         result_types.append(
             {
                 "name": str(item.get("name") or "探索型"),
                 "description": str(item.get("description") or ""),
-                "dimension_profile": _normalize_number_map(
-                    item.get("dimension_profile", {})
-                ),
+                "dimension_profile": profile,
                 "strengths": _string_list(item.get("strengths", [])),
                 "watchouts": _string_list(item.get("watchouts", [])),
                 "advice": str(item.get("advice") or ""),
             }
         )
+    if dimension_keys and not _result_profiles_are_distinct(
+        result_types, dimension_keys
+    ):
+        for index, item in enumerate(result_types):
+            item["dimension_profile"] = _fallback_dimension_profile(
+                index, max(len(result_types), 1), dimension_keys
+            )
     return result_types
+
+
+def _result_profiles_are_distinct(
+    result_types: list[dict[str, Any]],
+    dimension_keys: list[str],
+) -> bool:
+    """检查人格画像坐标是否真的拉开，避免所有类型挤在同一位置。"""
+
+    if len(result_types) < 2:
+        return False
+    profiles = [
+        {
+            key: _number(item.get("dimension_profile", {}).get(key, 0.0))
+            for key in dimension_keys
+        }
+        for item in result_types
+    ]
+    rounded_profiles = {
+        tuple(round(profile[key], 2) for key in dimension_keys)
+        for profile in profiles
+    }
+    if len(rounded_profiles) < len(profiles):
+        return False
+    distances = [
+        sum(
+            (left[key] - right[key]) ** 2
+            for key in dimension_keys
+        )
+        for left_index, left in enumerate(profiles)
+        for right in profiles[left_index + 1 :]
+    ]
+    return bool(distances) and min(distances) >= 0.25
+
+
+def _number(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _fallback_dimension_profile(
+    index: int,
+    total: int,
+    dimension_keys: list[str],
+) -> dict[str, float]:
+    """为缺失画像坐标的人格生成分散的默认坐标，避免所有答案都命中同一类型。"""
+
+    if not dimension_keys:
+        return {}
+    if len(dimension_keys) == 1:
+        if total <= 1:
+            values = [0.0]
+        else:
+            values = [
+                -0.85 + 1.7 * position / (total - 1)
+                for position in range(total)
+            ]
+        return {dimension_keys[0]: round(values[index], 3)}
+
+    angle = 2 * math.pi * index / max(total, 1)
+    if len(dimension_keys) == 2:
+        return {
+            dimension_keys[0]: round(0.85 * math.cos(angle), 3),
+            dimension_keys[1]: round(0.85 * math.sin(angle), 3),
+        }
+    return {
+        key: round(0.85 * math.cos(angle + 2 * math.pi * offset / len(dimension_keys)), 3)
+        for offset, key in enumerate(dimension_keys)
+    }
 
 
 def _question_from_dict(item: dict[str, Any], index: int) -> SurveyQuestion:

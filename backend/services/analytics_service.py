@@ -242,12 +242,17 @@ def _profile_distance(
 ) -> float:
     """计算用户维度画像与结果类型画像的距离。"""
 
-    if not isinstance(profile, dict) or not profile:
+    if not isinstance(profile, dict):
+        profile = {}
+    profile_keys = {str(key) for key in profile}
+    keys = set(scores) | profile_keys
+    if not keys:
         return 0.0
+    missing_penalty = 0.25 * len(keys - profile_keys)
     return sum(
-        (scores.get(str(key), 0.0) - _number(value)) ** 2
-        for key, value in profile.items()
-    )
+        (scores.get(key, 0.0) - _number(profile.get(key, 0.0))) ** 2
+        for key in keys
+    ) + missing_penalty
 
 
 def _number(value: Any) -> float:
@@ -304,6 +309,7 @@ def summarize_responses(
             for question in facts["questions"]
         },
         "research_tags": facts["research_tags"],
+        "result_types": facts["result_types"],
         "dimension_stats": facts["dimensions"],
         "question_stats": facts["questions"],
     }
@@ -352,11 +358,15 @@ def build_research_facts(
         )
 
     dimensions = _build_dimension_facts(survey, responses, question_facts)
+    result_types = _build_result_type_facts(survey, responses)
     return {
         "research_goal": survey.brand_goal,
         "theme": survey.theme,
         "response_count": len(responses),
-        "result_counts": dict(Counter(response.result_type for response in responses)),
+        "result_counts": {
+            item["name"]: item["count"] for item in result_types
+        },
+        "result_types": result_types,
         "research_tags": sorted(
             {
                 question.research_tag
@@ -500,6 +510,50 @@ def _build_dimension_facts(
     return result
 
 
+def _build_result_type_facts(
+    survey: WrappedSurvey,
+    responses: list[SurveyResponse],
+) -> list[dict[str, Any]]:
+    """列出全部人格画像及样本分布，包含当前无人命中的类型。"""
+
+    counts = Counter(response.result_type for response in responses)
+    total = len(responses)
+    result: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for item in survey.result_types:
+        name = str(item.get("name") or "未命名类型")
+        seen_names.add(name)
+        result.append(
+            {
+                "name": name,
+                "description": str(item.get("description") or ""),
+                "dimension_profile": _normalize_profile(item.get("dimension_profile", {})),
+                "strengths": _string_list(item.get("strengths", [])),
+                "watchouts": _string_list(item.get("watchouts", [])),
+                "advice": str(item.get("advice") or ""),
+                "count": counts.get(name, 0),
+                "percentage": _percentage(counts.get(name, 0), total),
+            }
+        )
+
+    for name, count in counts.items():
+        if name in seen_names:
+            continue
+        result.append(
+            {
+                "name": name,
+                "description": "",
+                "dimension_profile": {},
+                "strengths": [],
+                "watchouts": [],
+                "advice": "",
+                "count": count,
+                "percentage": _percentage(count, total),
+            }
+        )
+    return result
+
+
 def _normalize_research_analysis(
     raw: dict[str, Any],
     survey: WrappedSurvey,
@@ -545,6 +599,7 @@ def _normalize_research_analysis(
         "theme": survey.theme,
         "response_count": facts["response_count"],
         "result_counts": facts["result_counts"],
+        "result_types": facts["result_types"],
         "research_tags": facts["research_tags"],
         "dimensions": dimensions,
         "questions": facts["questions"],
@@ -561,6 +616,8 @@ def _research_analysis_system_prompt() -> str:
     return (
         "你是资深市场研究分析师。请围绕用户给出的调研目标，对已经统计好的匿名问卷事实进行综合解读。"
         "调研目标是唯一的主要主题，不能把互动结果类型当成研究目标，也不能偏离目标另起主题。"
+        "facts.result_types 是本问卷完整的人格画像清单，包含未被任何答卷命中的类型；"
+        "分析时必须知道这些类型的总范围，但不要把互动人格标签替代调研目标。"
         "必须根据题目映射和 dimensions 分维度分析，结合 questions 中的选项分布说明差异。"
         "输入中的人数、比例、指数和答卷数已经由系统准确计算，禁止修改、四舍五入重算或虚构任何数字；"
         "输出文字中尽量不要重复具体数字，数字由系统表格展示。"
@@ -592,6 +649,14 @@ def _question_dimension_keys(question: Any) -> list[str]:
     for scores in question.option_scores.values():
         keys.update(str(key) for key in scores if key)
     return sorted(keys)
+
+
+def _normalize_profile(value: Any) -> dict[str, float]:
+    """把结果画像坐标统一为数值字典，用于分析 facts。"""
+
+    if not isinstance(value, dict):
+        return {}
+    return {str(key): _number(item) for key, item in value.items()}
 
 
 def _answer_values(value: Any) -> list[str]:

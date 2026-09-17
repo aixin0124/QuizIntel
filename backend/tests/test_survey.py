@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import requests
 
-from backend.models import SurveyQuestion
+from backend.models import SurveyQuestion, WrappedQuestion, WrappedSurvey
 from backend.services import llm_service as llm_module
 from backend.services.analytics_service import (
     build_research_analysis,
@@ -23,6 +23,7 @@ from backend.services.survey_service import (
     build_wrapped_survey,
     parse_survey_text,
     parse_wjx_html,
+    wrapped_survey_from_dict,
 )
 
 
@@ -236,6 +237,127 @@ def test_generated_survey_requires_enough_questions() -> None:
         raise AssertionError("互动题少于最低数量时应拒绝保存")
 
 
+def test_generated_result_types_get_distinct_dimension_profiles() -> None:
+    raw = {
+        "dimensions": [
+            {"key": "initiative", "name": "主动性"},
+            {"key": "prudence", "name": "谨慎度"},
+        ],
+        "result_types": [
+            {"name": "开拓型", "description": "行动快。"},
+            {"name": "协调型", "description": "重平衡。"},
+            {"name": "守护型", "description": "更谨慎。"},
+            {"name": "观察型", "description": "先看清。"},
+        ],
+        "questions": [
+            {
+                "question_id": f"iq{index}",
+                "public_text": f"场景 {index}",
+                "question_type": "single_choice",
+                "options": ["先观察", "马上行动"],
+                "option_scores": {
+                    "先观察": {"initiative": -0.5, "prudence": 0.5},
+                    "马上行动": {"initiative": 0.5, "prudence": -0.5},
+                },
+                "dimension_weights": {"initiative": 1.0, "prudence": 1.0},
+            }
+            for index in range(1, MIN_GENERATED_QUESTIONS + 1)
+        ],
+    }
+
+    survey = _normalize_wrapped_survey(raw, [], "测试", "行动风格")
+    profiles = [
+        item["dimension_profile"] for item in survey.result_types
+    ]
+
+    assert all(set(profile) == {"initiative", "prudence"} for profile in profiles)
+    assert len({tuple(profile.items()) for profile in profiles}) == 4
+
+
+def test_result_type_uses_completed_profiles_instead_of_always_first() -> None:
+    questions = [
+        WrappedQuestion(
+            question_id="iq1",
+            public_text="你会怎么做？",
+            question_type="single_choice",
+            options=["先观察", "马上行动"],
+            option_scores={
+                "先观察": {"initiative": -0.9, "prudence": 0.9},
+                "马上行动": {"initiative": 0.9, "prudence": -0.9},
+            },
+            dimension_weights={"initiative": 1.0, "prudence": 1.0},
+        )
+    ]
+    survey = WrappedSurvey(
+        survey_name="行动风格测评",
+        theme="行动风格",
+        tagline="",
+        intro="",
+        disclosure="",
+        dimensions=[
+            {"key": "initiative", "name": "主动性"},
+            {"key": "prudence", "name": "谨慎度"},
+        ],
+        result_types=[
+            {
+                "name": "守护型",
+                "description": "",
+                "dimension_profile": {"initiative": -0.9, "prudence": 0.9},
+            },
+            {
+                "name": "开拓型",
+                "description": "",
+                "dimension_profile": {"initiative": 0.9, "prudence": -0.9},
+            },
+        ],
+        questions=questions,
+    )
+
+    result = calculate_result_type(survey, {"iq1": "马上行动"})
+
+    assert result["name"] == "开拓型"
+
+
+def test_saved_survey_restore_completes_result_profiles() -> None:
+    payload = {
+        "survey_name": "行动风格测评",
+        "theme": "行动风格",
+        "tagline": "",
+        "intro": "",
+        "disclosure": "",
+        "dimensions": [
+            {"key": "initiative", "name": "主动性"},
+            {"key": "prudence", "name": "谨慎度"},
+        ],
+        "result_types": [
+            {"name": "开拓型"},
+            {"name": "协调型"},
+            {"name": "守护型"},
+            {"name": "观察型"},
+        ],
+        "questions": [
+            {
+                "question_id": "iq1",
+                "public_text": "你会怎么做？",
+                "question_type": "single_choice",
+                "options": ["先观察", "马上行动"],
+                "option_scores": {
+                    "先观察": {"initiative": -0.8, "prudence": 0.8},
+                    "马上行动": {"initiative": 0.8, "prudence": -0.8},
+                },
+                "dimension_weights": {"initiative": 1.0, "prudence": 1.0},
+            }
+        ],
+    }
+
+    survey = wrapped_survey_from_dict(payload)
+
+    assert all(
+        set(item["dimension_profile"]) == {"initiative", "prudence"}
+        for item in survey.result_types
+    )
+
+
 def test_dimension_scores_ignore_unconfigured_questions() -> None:
     survey = build_wrapped_survey(
         [SurveyQuestion("q1", "价格", options=["100", "200"])],
@@ -284,6 +406,28 @@ def test_research_facts_keep_exact_counts_and_percentages() -> None:
     facts = build_research_facts(survey, responses)
 
     assert facts["response_count"] == 2
+    assert facts["result_types"] == [
+        {
+            "name": "理性探索型",
+            "description": "你会认真比较后再决定。",
+            "dimension_profile": {},
+            "strengths": [],
+            "watchouts": [],
+            "advice": "",
+            "count": 0,
+            "percentage": 0.0,
+        },
+        {
+            "name": "探索型",
+            "description": "",
+            "dimension_profile": {},
+            "strengths": [],
+            "watchouts": [],
+            "advice": "",
+            "count": 2,
+            "percentage": 100.0,
+        },
+    ]
     assert facts["questions"][0]["options"] == [
         {"option": "先观察", "count": 1, "percentage": 50.0},
         {"option": "马上行动", "count": 1, "percentage": 50.0},
