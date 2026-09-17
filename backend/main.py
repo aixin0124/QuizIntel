@@ -71,6 +71,12 @@ class WrapRequest(BaseModel):
     theme_hint: str
 
 
+class RenameSurveyRequest(BaseModel):
+    """修改已生成问卷标题请求。"""
+
+    survey_name: str
+
+
 class ResponseRequest(BaseModel):
     """提交答卷请求。"""
 
@@ -287,6 +293,29 @@ def get_survey(survey_id: int, x_admin_token: str | None = Header(default=None))
     if not row:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     return row
+
+
+@app.post("/api/surveys/{survey_id}/title")
+def rename_survey(
+    survey_id: int,
+    request: RenameSurveyRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """允许管理员修改 AI 生成后的问卷标题。"""
+
+    require_admin(x_admin_token)
+    row = database.get_survey(survey_id)
+    if not row or row["deleted_at"]:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    survey_name = " ".join(request.survey_name.split()).strip()
+    if not survey_name:
+        raise HTTPException(status_code=422, detail="问卷标题不能为空。")
+    if len(survey_name) > 60:
+        raise HTTPException(status_code=422, detail="问卷标题不能超过 60 个字符。")
+    updated = database.update_survey_title(survey_id, survey_name)
+    if not updated:
+        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    return {"survey": updated["payload"], "item": updated}
 
 
 @app.delete("/api/surveys/{survey_id}")

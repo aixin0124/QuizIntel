@@ -91,6 +91,27 @@ class ResearchDatabase:
             )
             return int(cursor.lastrowid)
 
+    def update_survey_title(self, survey_id: int, survey_name: str) -> dict[str, Any] | None:
+        """同步更新问卷标题摘要和完整 payload。"""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload FROM wrapped_surveys WHERE id = ?", (survey_id,)
+            ).fetchone()
+            if not row:
+                return None
+            payload = json.loads(row["payload"])
+            payload["survey_name"] = survey_name
+            connection.execute(
+                "UPDATE wrapped_surveys SET survey_name = ?, payload = ? WHERE id = ?",
+                (
+                    survey_name,
+                    json.dumps(payload, ensure_ascii=False),
+                    survey_id,
+                ),
+            )
+        return self.get_survey(survey_id)
+
     def save_response(self, response: SurveyResponse, survey_id: int | None = None) -> int:
         with self._connect() as connection:
             cursor = connection.execute(

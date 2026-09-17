@@ -1717,6 +1717,41 @@ small {
   margin-top: 4px;
 }
 
+.title-editor {
+  max-width: 680px;
+  margin: 0 0 8px;
+}
+
+.title-editor label {
+  margin: 0 0 7px;
+  color: #788594;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.title-editor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.title-editor-row input {
+  min-width: 0;
+  color: #18212b;
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1.22;
+  padding: 9px 12px;
+}
+
+.title-editor-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
 .source-badge {
   gap: 7px;
   border: 1px solid #c7e4db;
@@ -2410,6 +2445,14 @@ small {
 
   .page-title > .source-badge {
     margin-top: 0;
+  }
+
+  .title-editor-row {
+    grid-template-columns: 1fr;
+  }
+
+  .title-editor-row button {
+    justify-content: center;
   }
 
   .analysis-summary,
