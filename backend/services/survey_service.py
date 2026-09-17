@@ -552,7 +552,10 @@ def _system_prompt() -> str:
         "职场主题可以测量协作、决策、反馈和风险偏好。不要把不相关框架硬套到主题上。"
         "\n5. 必须输出可复算的评分规则：每道题的 option_scores 给出每个选项在各维度上的"
         "-1 到 1 分值，dimension_weights 给出题目权重。不能用答案数量取模。"
-        "\n6. 结果类型生成 4 个相互区分的画像，每个画像的 description 不超过 80 字，"
+        "\n6. 结果类型生成 4 个相互区分的画像。每个画像必须提供 personality_reference，"
+        "格式为“形容词 + 名词”，例如“谨慎清醒的关系观察者”，不要包含“你是”。"
+        "description 必须是一段 180 至 220 字的中文人格解析，重点描写人物性格、"
+        "心理活动、行为惯性和关系/场景中的取舍，不要只写一句概括；"
         "strengths 和 watchouts 各 1 至 2 条，advice 不超过 50 字。"
         "结果描述要能结合用户选择解释，不能只写空泛夸赞。"
         "\n7. 通过 research_refs 把真正有研究关联的互动题映射回原题 question_id，"
@@ -578,8 +581,11 @@ def _blueprint_system_prompt() -> str:
         "原始题目只作为市场研究参考。只输出合法 JSON。"
         "dimensions 的每个字段保持简短；result_types 必须恰好 4 个，且每个都必须有"
         "覆盖全部 dimension key 的 dimension_profile，取值 -1 到 1；4 个画像的维度坐标"
-        "要明显拉开，不能集中在同一个象限。description 不超过 80 字，"
-        "strengths 和 watchouts 各 1 至 2 条，advice 不超过 50 字。"
+        "要明显拉开，不能集中在同一个象限。每个画像必须提供 personality_reference，"
+        "格式为“形容词 + 名词”，例如“谨慎清醒的关系观察者”，不要包含“你是”。"
+        "description 必须是一段 180 至 220 字的中文人格解析，重点描写人物性格、"
+        "心理活动、行为惯性和具体情境中的取舍；strengths 和 watchouts 各 1 至 2 条，"
+        "advice 不超过 50 字。"
         "如果结果是动物、星座、职业或角色，具体结果名称只保留在 result_types 中，"
         "不要放进 survey_name、theme、tagline、intro 或 analysis_method；"
         "用户应当在答题时无法直接猜出结果类别。"
@@ -624,7 +630,8 @@ def _output_schema() -> dict[str, Any]:
         "result_types": [
             {
                 "name": "类型名称",
-                "description": "类型概述",
+                "personality_reference": "形容词 + 名词，例如谨慎清醒的关系观察者",
+                "description": "180 至 220 字的人格解析长文本",
                 "dimension_profile": {"dimension_key": 0.8},
                 "strengths": ["优势"],
                 "watchouts": ["可能的盲点"],
@@ -670,7 +677,8 @@ def _blueprint_schema() -> dict[str, Any]:
         "result_types": [
             {
                 "name": "结果类型",
-                "description": "类型概述",
+                "personality_reference": "形容词 + 名词，例如谨慎清醒的关系观察者",
+                "description": "180 至 220 字的人格解析长文本",
                 "dimension_profile": {"dimension_key": 0.8},
                 "strengths": ["优势"],
                 "watchouts": ["盲点"],
@@ -956,6 +964,12 @@ def _normalize_result_types(
         result_types.append(
             {
                 "name": str(item.get("name") or "探索型"),
+                "personality_reference": str(
+                    item.get("personality_reference")
+                    or item.get("reference")
+                    or item.get("summary_reference")
+                    or ""
+                ),
                 "description": str(item.get("description") or ""),
                 "dimension_profile": profile,
                 "strengths": _string_list(item.get("strengths", [])),

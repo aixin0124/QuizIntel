@@ -7,7 +7,7 @@ import "./styles.css";
 type SurveyQuestion = { question_id: string; text: string; question_type: string; options: string[]; research_tag: string; required: boolean };
 type WrappedQuestion = { question_id: string; public_text: string; question_type: string; options: string[]; research_tag: string; source_text: string; required: boolean; research_refs?: string[]; rationale?: string };
 type DimensionBreakdown = { key: string; name: string; score: number; signal: string; description: string };
-type ResultAnalysis = { summary: string; dimension_breakdown: DimensionBreakdown[]; evidence: Array<{ question: string; answer: string; reason: string; rationale?: string }>; strengths: string[]; watchouts: string[]; advice: string };
+type ResultAnalysis = { summary: string; personality_reference?: string; dimension_breakdown: DimensionBreakdown[]; evidence: Array<{ question: string; answer: string; reason: string; rationale?: string }>; strengths: string[]; watchouts: string[]; advice: string };
 type ResultPayload = { name: string; description: string; strengths?: string[]; watchouts?: string[]; advice?: string; dimension_scores?: Record<string, number>; analysis?: ResultAnalysis };
 type WrappedSurvey = { survey_name: string; theme: string; tagline: string; intro: string; disclosure: string; result_types: Array<{ name: string; description: string }>; questions: WrappedQuestion[]; brand_goal: string; source: string; dimensions?: Array<{ key: string; name: string; description: string; high_pole: string; low_pole: string }>; analysis_method?: string };
 type SurveySummary = { id: number; survey_name: string; theme: string; source: string; created_at: string; response_count: number; status: "open" | "ended"; ended_at?: string | null; deleted_at?: string | null };
@@ -75,15 +75,92 @@ function ResultPanel({ result }: { result: ResultPayload }) {
   const strengths = analysis?.strengths?.length ? analysis.strengths : result.strengths || [];
   const watchouts = analysis?.watchouts?.length ? analysis.watchouts : result.watchouts || [];
   const advice = analysis?.advice || result.advice || "把这份结果当作自我观察的起点，结合具体场景判断是否符合你最近的状态。";
-  const summary = analysis?.summary || result.description;
   const dimensions = analysis?.dimension_breakdown || [];
+  const personalityReference = analysis?.personality_reference || buildPersonalityReference(result, dimensions);
+  const summary = buildPersonalitySummary(analysis?.summary || result.description, result, dimensions, personalityReference);
   const highlightDimensions = dimensions.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 3);
   const matchIndex = getResultMatchIndex(dimensions);
-  return <div className="result result-report"><div className="result-hero"><div><p className="result-kicker">YOUR RESULT</p><h3>你是{result.name}</h3><p>{summary}</p>{highlightDimensions.length > 0 && <div className="result-tags">{highlightDimensions.map((item) => <span key={item.key}>{item.name} · {item.signal}</span>)}</div>}</div><div className="result-score"><span>匹配指数</span><b>{matchIndex}</b><em>/ 100</em></div></div>{dimensions.length > 0 && <section className="result-section"><div className="result-section-title"><strong>维度画像</strong><span>根据你的选择换算出的倾向强弱</span></div><div className="dimension-grid">{dimensions.map((item) => { const percent = dimensionPercent(item.score); return <article className="dimension-card" key={item.key}><div className="dimension-card-head"><span>{item.name}</span><b>{item.signal}</b></div><div className="dimension-scale"><span style={{ width: `${percent}%` }} /></div><div className="dimension-card-foot"><small>{item.description}</small><em>{percent}%</em></div></article>; })}</div></section>}<section className="result-insights"><InsightCard title="你的突出特质" items={strengths} fallback="你的选择呈现出比较清晰的个人偏好。" /><InsightCard title="可以留意" items={watchouts} fallback="当结果落在中间区间时，可以结合真实场景继续观察。" /><div className="insight-card advice-card"><strong>带走一条建议</strong><p>{advice}</p></div></section></div>;
+  return <div className="result result-report"><div className="result-hero"><div><p className="result-kicker">YOUR RESULT</p><h3>你是{result.name}</h3><p>{getHeroSummary(summary)}</p>{highlightDimensions.length > 0 && <div className="result-tags">{highlightDimensions.map((item) => <span key={item.key}>{item.name} · {item.signal}</span>)}</div>}</div><div className="result-score"><span>匹配指数</span><b>{matchIndex}</b><em>/ 100</em></div></div>{dimensions.length > 0 && <section className="result-section"><div className="result-section-title"><strong>维度画像</strong><span>根据你的选择换算出的倾向强弱</span></div><div className="result-dimension-overview"><ResultRadarChart dimensions={dimensions} /><div className="dimension-grid">{dimensions.map((item) => { const percent = dimensionPercent(item.score); return <article className="dimension-card" key={item.key}><div className="dimension-card-head"><span>{item.name}</span><b>{item.signal}</b></div><div className="dimension-scale"><span style={{ width: `${percent}%` }} /></div><div className="dimension-card-foot"><small>{item.description}</small><em>{percent}%</em></div></article>; })}</div></div></section>}<section className="personality-section"><div className="personality-reference"><span>人格参考</span><strong>你是{personalityReference}</strong></div><div className="personality-analysis"><span>人格解析</span><p>{summary}</p></div></section><section className="result-insights"><InsightCard title="你的突出特质" items={strengths} fallback="你的选择呈现出比较清晰的个人偏好。" /><InsightCard title="可以留意" items={watchouts} fallback="当结果落在中间区间时，可以结合真实场景继续观察。" /><div className="insight-card advice-card"><strong>带走一条建议</strong><p>{advice}</p></div></section></div>;
 }
 
 function InsightCard({ title, items, fallback }: { title: string; items: string[]; fallback: string }) {
   return <div className="insight-card"><strong>{title}</strong><ul>{(items.length ? items : [fallback]).map((item) => <li key={item}>{item}</li>)}</ul></div>;
+}
+
+function ResultRadarChart({ dimensions }: { dimensions: DimensionBreakdown[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const option = useMemo<echarts.EChartsOption>(() => {
+    const values = dimensions.map((item) => dimensionPercent(item.score));
+    return {
+      color: ["#2467e8"],
+      tooltip: { trigger: "item" },
+      radar: {
+        radius: "68%",
+        center: ["50%", "52%"],
+        shape: "polygon",
+        splitNumber: 4,
+        indicator: dimensions.map((item) => ({ name: item.name, max: 100 })),
+        axisName: { color: "#526277", fontSize: 12 },
+        splitArea: { areaStyle: { color: ["#f7faff", "#ffffff"] } },
+        axisLine: { lineStyle: { color: "#d8e2ee" } },
+        splitLine: { lineStyle: { color: "#d8e2ee" } },
+      },
+      series: [{
+        type: "radar",
+        areaStyle: { color: "rgba(36, 103, 232, 0.18)" },
+        lineStyle: { width: 2 },
+        symbolSize: 5,
+        data: [{ value: values, name: "维度强度" }],
+      }],
+    };
+  }, [dimensions]);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const chart = echarts.init(ref.current);
+    chart.setOption(option);
+    const resize = () => chart.resize();
+    window.addEventListener("resize", resize);
+    return () => { window.removeEventListener("resize", resize); chart.dispose(); };
+  }, [option]);
+
+  return <div className="result-radar" aria-label="多维人格雷达图" ref={ref} />;
+}
+
+function buildPersonalityReference(result: ResultPayload, dimensions: DimensionBreakdown[]) {
+  const strongest = dimensions.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+  const adjectives = strongest.slice(0, 2).map(dimensionAdjective).filter(Boolean);
+  const typeName = result.name.endsWith("型") ? `${result.name.slice(0, -1)}者` : "自我观察者";
+  return `${(adjectives.length ? adjectives : ["清醒"]).join("")}的${typeName}`;
+}
+
+function dimensionAdjective(item: DimensionBreakdown) {
+  const text = `${item.name}${item.signal}`;
+  if (/理性|规划|现实|边界|谨慎|稳定/.test(text)) return item.score >= 0 ? "清醒" : "松弛";
+  if (/投入|主动|表达|热情|行动/.test(text)) return item.score >= 0 ? "真诚" : "克制";
+  if (/沟通|冲突|修复|包容/.test(text)) return item.score >= 0 ? "温和" : "直接";
+  if (item.score >= 0.35) return "笃定";
+  if (item.score <= -0.35) return "审慎";
+  return "弹性";
+}
+
+function buildPersonalitySummary(summary: string, result: ResultPayload, dimensions: DimensionBreakdown[], reference: string) {
+  const text = summary.trim();
+  if (text.length >= 120) return trimPersonalityText(text);
+  const leading = dimensions.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 3).map((item) => `${item.name}偏向${item.signal}`).join("、") || "多个维度保留弹性";
+  const base = `你的结果显示，你更像${reference}。${text || result.description}从维度画像看，${leading}，说明你不是只凭一时情绪做判断的人。你会先观察环境、关系节奏和现实条件，确认值得投入后才慢慢靠近。外在可能显得慢热，内心却一直在整理细节、评估风险和匹配度；一旦确认方向，你会用稳定行动表达认真。需要留意的是，过度分析会让真实感受被推迟表达，适度说出期待，会让关系或选择更有温度。`;
+  return trimPersonalityText(base);
+}
+
+function trimPersonalityText(value: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+  if (text.length <= 230) return text;
+  return `${text.slice(0, 227).replace(/[，；、\s]+$/, "")}。`;
+}
+
+function getHeroSummary(summary: string) {
+  if (summary.length <= 88) return summary;
+  return `${summary.slice(0, 85).replace(/[，；、\s]+$/, "")}。`;
 }
 
 function dimensionPercent(score: number) {

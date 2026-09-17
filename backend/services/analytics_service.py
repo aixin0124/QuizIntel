@@ -227,8 +227,17 @@ def build_result_analysis(
     if not advice:
         advice = "把这份结果当作自我观察的起点，结合具体场景判断是否符合你最近的状态。"
 
+    personality_reference = _build_personality_reference(survey, result, breakdown)
+    summary = _build_personality_summary(
+        survey,
+        result,
+        breakdown,
+        personality_reference,
+    )
+
     return {
-        "summary": str(result.get("description") or ""),
+        "summary": summary,
+        "personality_reference": personality_reference,
         "dimension_breakdown": breakdown,
         "evidence": evidence[:4],
         "strengths": strengths,
@@ -260,6 +269,128 @@ def _number(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _build_personality_reference(
+    survey: WrappedSurvey,
+    result: dict[str, Any],
+    breakdown: list[dict[str, Any]],
+) -> str:
+    """生成人格参考短句，格式保持为“形容词 + 名词”。"""
+
+    explicit = str(
+        result.get("personality_reference")
+        or result.get("reference")
+        or result.get("summary_reference")
+        or ""
+    ).strip()
+    if explicit:
+        return explicit.removeprefix("你是").strip(" ，。")
+
+    sorted_dimensions = sorted(
+        breakdown,
+        key=lambda item: abs(_number(item.get("score"))),
+        reverse=True,
+    )
+    adjectives = [
+        _dimension_adjective(item)
+        for item in sorted_dimensions[:2]
+    ]
+    adjectives = [item for item in adjectives if item]
+    if not adjectives:
+        adjectives = ["稳定清醒"]
+
+    noun = _reference_noun(survey, result)
+    return f"{''.join(adjectives[:2])}的{noun}"
+
+
+def _dimension_adjective(item: dict[str, Any]) -> str:
+    """根据维度方向提炼更像人格画像的修饰词。"""
+
+    name = str(item.get("name") or "")
+    signal = str(item.get("signal") or "")
+    score = _number(item.get("score"))
+    text = f"{name}{signal}"
+    if any(keyword in text for keyword in ("理性", "规划", "稳定", "现实", "边界", "谨慎")):
+        return "清醒" if score >= 0 else "松弛"
+    if any(keyword in text for keyword in ("投入", "主动", "表达", "热情", "行动")):
+        return "真诚" if score >= 0 else "克制"
+    if any(keyword in text for keyword in ("冲突", "沟通", "修复", "包容")):
+        return "温和" if score >= 0 else "直接"
+    if any(keyword in text for keyword in ("独立", "空间", "边界")):
+        return "自持" if score >= 0 else "亲近"
+    if score >= 0.35:
+        return "笃定"
+    if score <= -0.35:
+        return "审慎"
+    return "弹性"
+
+
+def _reference_noun(survey: WrappedSurvey, result: dict[str, Any]) -> str:
+    """根据主题和类型名选择人格参考的名词尾部。"""
+
+    theme = f"{survey.theme}{survey.survey_name}".lower()
+    if any(keyword in theme for keyword in ("恋爱", "关系", "亲密", "爱情", "伴侣")):
+        if "观察" in str(result.get("name") or ""):
+            return "关系观察者"
+        return "关系经营者"
+    if any(keyword in theme for keyword in ("消费", "购买", "购物", "品牌")):
+        return "消费决策者"
+    if any(keyword in theme for keyword in ("旅行", "出游")):
+        return "旅行规划者"
+    if any(keyword in theme for keyword in ("职场", "工作", "协作")):
+        return "协作实践者"
+    name = str(result.get("name") or "").strip()
+    if name.endswith("型") and len(name) > 1:
+        return f"{name[:-1]}者"
+    return "自我观察者"
+
+
+def _build_personality_summary(
+    survey: WrappedSurvey,
+    result: dict[str, Any],
+    breakdown: list[dict[str, Any]],
+    personality_reference: str,
+) -> str:
+    """把过短类型描述扩写为约 200 字的人格解析。"""
+
+    description = str(result.get("description") or "").strip()
+    if len(description) >= 120:
+        return _trim_personality_summary(description)
+
+    sorted_dimensions = sorted(
+        breakdown,
+        key=lambda item: abs(_number(item.get("score"))),
+        reverse=True,
+    )
+    leading = "、".join(
+        f"{item.get('name')}偏向{item.get('signal')}"
+        for item in sorted_dimensions[:3]
+        if item.get("name") and item.get("signal")
+    )
+    if not leading:
+        leading = "多个维度都保留了一定弹性"
+
+    theme = survey.theme or survey.survey_name or "当前主题"
+    base = (
+        f"你的结果显示，你在{theme}里更像{personality_reference}。"
+        f"{description}"
+        f"从维度画像看，{leading}，说明你不会只凭一时情绪推进选择，"
+        "而是习惯先在心里建立判断标准：对方是否可靠、节奏是否舒服、现实条件是否支撑。"
+        "你外在可能显得慢热、克制，内心其实一直在观察细节和风险；一旦确认匹配，"
+        "你会用稳定投入来证明认真。需要留意的是，过度分析可能让真实感受被推迟表达，"
+        "适度说出期待，会让关系或决策更有温度。"
+    )
+    return _trim_personality_summary(base)
+
+
+def _trim_personality_summary(value: str) -> str:
+    """控制人格解析长度，避免结果页被长文撑得过散。"""
+
+    text = " ".join(value.split())
+    if len(text) <= 230:
+        return text
+    return text[:227].rstrip("，；、 ") + "。"
 
 
 def _string_list(value: Any) -> list[str]:

@@ -793,6 +793,26 @@ small {
   margin-top: 17px;
 }
 
+.result-dimension-overview {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.42fr) minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.result-dimension-overview .dimension-grid {
+  margin-top: 0;
+}
+
+.result-radar {
+  width: 100%;
+  min-height: 280px;
+  border: 1px solid #dfe6ef;
+  border-radius: 7px;
+  background: #fbfdff;
+}
+
 .dimension-card {
   min-width: 0;
 }
@@ -856,6 +876,47 @@ small {
   border-top: 1px solid #e0e6ee;
   background: #fbfcfe;
   padding: 20px 28px 26px;
+}
+
+.personality-section {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  gap: 14px;
+  border-top: 1px solid #e0e6ee;
+  background: #ffffff;
+  padding: 22px 28px;
+}
+
+.personality-reference,
+.personality-analysis {
+  min-width: 0;
+  border: 1px solid #dfe6ef;
+  border-radius: 7px;
+  background: #fbfcfe;
+  padding: 16px;
+}
+
+.personality-reference span,
+.personality-analysis span {
+  display: block;
+  color: #2467e8;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.personality-reference strong {
+  display: block;
+  margin-top: 10px;
+  color: #172033;
+  font-size: 22px;
+  line-height: 1.35;
+}
+
+.personality-analysis p {
+  margin: 9px 0 0;
+  color: #405168;
+  font-size: 14px;
+  line-height: 1.9;
 }
 
 .insight-card {
@@ -2003,6 +2064,8 @@ small {
   .workspace.two,
   .dashboard-grid,
   .result-insights,
+  .result-dimension-overview,
+  .personality-section,
   .finding-grid {
     grid-template-columns: 1fr;
   }
@@ -2091,6 +2154,10 @@ small {
 
   .dimension-grid {
     grid-template-columns: 1fr;
+  }
+
+  .result-radar {
+    min-height: 250px;
   }
 
   .result-section-title {
@@ -2207,6 +2274,7 @@ small {
 
   .result-hero,
   .result-section,
+  .personality-section,
   .result-insights {
     padding-left: 19px;
     padding-right: 19px;
