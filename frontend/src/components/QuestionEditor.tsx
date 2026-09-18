@@ -1,0 +1,12 @@
+import { Plus, Trash2, X, Database } from "lucide-react";
+import type { SurveyQuestion } from "../types";
+
+export function QuestionEditor({ questions, onChange }: { questions: SurveyQuestion[]; onChange: (questions: SurveyQuestion[]) => void }) {
+  function updateQuestion(index: number, patch: Partial<SurveyQuestion>) {
+    onChange(questions.map((question, questionIndex) => questionIndex === index ? { ...question, ...patch } : question));
+  }
+  function addQuestion() {
+    onChange([...questions, { question_id: `q${questions.length + 1}`, text: "", question_type: "single_choice", options: ["", ""], research_tag: "", required: true }]);
+  }
+  return <section className="question-editor panel"><div className="section-heading"><div><h2><Database size={19} /> 已解析题目</h2><p>解析后可直接填写和调整，修改内容会用于生成互动包装。</p></div><button className="secondary compact-action" onClick={addQuestion}><Plus size={16} /> 新增题目</button></div>{!questions.length ? <div className="editor-empty"><p>尚未解析问卷。</p><span>选择推荐模板或粘贴问卷星公开链接后，题目会出现在这里。</span></div> : <div className="editor-list">{questions.map((question, index) => <article className="question-editor-item" key={`${question.question_id}-${index}`}><div className="editor-item-head"><span className="editor-index">{String(index + 1).padStart(2, "0")}</span><strong>第 {index + 1} 题</strong><button className="icon-button subtle-danger" onClick={() => onChange(questions.filter((_, itemIndex) => itemIndex !== index))} title="删除题目" aria-label={`删除第 ${index + 1} 题`}><Trash2 size={16} /></button></div><label>题目内容</label><textarea className="question-text-input" value={question.text} onChange={(event) => updateQuestion(index, { text: event.target.value })} /><div className="option-editor-head"><label>选项</label><button className="text-action" onClick={() => updateQuestion(index, { options: [...question.options, ""] })}><Plus size={14} /> 添加选项</button></div>{question.options.map((option, optionIndex) => <div className="option-editor-row" key={`${index}-${optionIndex}`}><span>{String.fromCharCode(65 + optionIndex)}</span><input value={option} onChange={(event) => updateQuestion(index, { options: question.options.map((item, itemIndex) => itemIndex === optionIndex ? event.target.value : item) })} /><button className="icon-button" onClick={() => updateQuestion(index, { options: question.options.filter((_, itemIndex) => itemIndex !== optionIndex) })} disabled={question.options.length <= 1}><X size={15} /></button></div>)}</article>)}</div>}</section>;
+}

@@ -76,9 +76,12 @@ class Settings:
     database_path: str = _read_project_path_env(
         "DATABASE_PATH", str(PROJECT_ROOT / "data" / "fun_research.db")
     )
+    database_url: str = _read_first_env(
+        "DATABASE_URL",
+        default=database_path,
+    )
     request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "120"))
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
-    admin_password: str = os.getenv("ADMIN_PASSWORD", "10124")
 
     @property
     def has_llm(self) -> bool:

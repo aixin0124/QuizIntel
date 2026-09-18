@@ -430,6 +430,11 @@ def summarize_responses(
     """生成页面图表和报告所需的汇总数据。"""
 
     facts = build_research_facts(survey, responses)
+    sample_warning = (
+        "当前样本量不足 30 份，适合做功能演示和初步方向观察，不建议直接外推总体。"
+        if facts["response_count"] < 30
+        else "当前样本量已达到基础描述性分析门槛，仍需注意样本来源和抽样偏差。"
+    )
     return {
         "response_count": facts["response_count"],
         "result_counts": facts["result_counts"],
@@ -443,7 +448,51 @@ def summarize_responses(
         "result_types": facts["result_types"],
         "dimension_stats": facts["dimensions"],
         "question_stats": facts["questions"],
+        "cross_analysis": _build_cross_analysis(survey, responses),
+        "completion_stats": [
+            {
+                "question_id": item["question_id"],
+                "question": item["question"],
+                "answered_count": item["answered_count"],
+                "answer_rate": item["answer_rate"],
+                "dropout_rate": round(100 - item["answer_rate"], 1),
+            }
+            for item in facts["questions"]
+        ],
+        "sample_warning": sample_warning,
+        "credibility_note": (
+            "本分析只使用后端本地统计得到的人数、比例、维度分数和答题事实；"
+            "AI 仅负责文字归纳，不改写或重算统计数字。"
+        ),
     }
+
+
+def build_collection_trend(response_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按答卷提交日期生成回收趋势，数字只来自本地答卷记录。"""
+
+    counts: Counter[str] = Counter()
+    for row in response_rows:
+        timestamp = row.get("submitted_at") or row.get("created_at")
+        if not timestamp:
+            continue
+        date_key = str(timestamp)[:10]
+        if len(date_key) != 10:
+            continue
+        counts[date_key] += 1
+
+    cumulative = 0
+    trend: list[dict[str, Any]] = []
+    for date_key in sorted(counts):
+        count = counts[date_key]
+        cumulative += count
+        trend.append(
+            {
+                "date": date_key,
+                "count": count,
+                "cumulative_count": cumulative,
+            }
+        )
+    return trend
 
 
 def build_research_facts(
@@ -537,6 +586,39 @@ def build_research_analysis(
         ),
     )
     return _normalize_research_analysis(raw, survey, facts)
+
+
+def _build_cross_analysis(
+    survey: WrappedSurvey,
+    responses: list[SurveyResponse],
+) -> list[dict[str, Any]]:
+    """按结果类型交叉统计每道题的选项差异。"""
+
+    result_names = sorted({response.result_type for response in responses})
+    if not result_names:
+        return []
+    result: list[dict[str, Any]] = []
+    for question in survey.questions:
+        by_result: dict[str, dict[str, int]] = {
+            name: {option: 0 for option in question.options}
+            for name in result_names
+        }
+        for response in responses:
+            values = _answer_values(response.answers.get(question.question_id))
+            if not values:
+                continue
+            option_counts = by_result.setdefault(response.result_type, {})
+            for value in values:
+                option_counts[value] = option_counts.get(value, 0) + 1
+        result.append(
+            {
+                "question_id": question.question_id,
+                "question": question.public_text,
+                "research_tag": question.research_tag,
+                "by_result_type": by_result,
+            }
+        )
+    return result
 
 
 def _build_dimension_facts(

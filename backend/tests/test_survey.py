@@ -13,6 +13,7 @@ from backend.services.analytics_service import (
     build_research_analysis,
     build_response,
     build_research_facts,
+    build_collection_trend,
     calculate_result_type,
     calculate_dimension_scores,
     summarize_responses,
@@ -688,13 +689,13 @@ def test_database_survey_status_changes_to_ended(tmp_path) -> None:
     )
     survey_id = database.save_survey(survey)
 
-    assert database.get_survey(survey_id)["status"] == "open"
+    assert database.get_survey(survey_id)["status"] == "draft"
     database.finish_survey(survey_id, {"research_conclusion": "完成"})
 
     saved = database.get_survey(survey_id)
     assert saved["status"] == "ended"
     assert saved["analysis"]["research_conclusion"] == "完成"
-    assert database.list_surveys(status="open") == []
+    assert database.list_surveys(status="draft") == []
     assert database.list_surveys(status="ended")[0]["id"] == survey_id
 
 
@@ -736,6 +737,73 @@ def test_database_updates_survey_title_in_summary_and_payload(tmp_path) -> None:
     assert database.list_surveys()[0]["survey_name"] == "自定义问卷标题"
 
 
+def test_database_updates_survey_content_and_version(tmp_path) -> None:
+    database = ResearchDatabase(str(tmp_path / "survey.sqlite"))
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"])],
+        "大学生消费情况调查",
+        "消费偏好",
+        llm_service=FakeLLMService(),
+    )
+    survey_id = database.save_survey(survey, status="draft")
+    saved = database.get_survey(survey_id)
+    assert saved["version"] == 1
+
+    survey.survey_name = "修改后的互动问卷"
+    survey.questions[0].public_text = "你更愿意选择哪个价格？"
+    updated = database.update_survey_content(survey_id, survey)
+
+    assert updated is not None
+    assert updated["version"] == 2
+    assert updated["payload"]["survey_name"] == "修改后的互动问卷"
+    assert updated["payload"]["questions"][0]["public_text"] == "你更愿意选择哪个价格？"
+
+
+def test_collection_trend_uses_submission_dates() -> None:
+    trend = build_collection_trend(
+        [
+            {"submitted_at": "2026-09-17T10:00:00", "is_test": False},
+            {"submitted_at": "2026-09-17T11:00:00", "is_test": False},
+            {"submitted_at": "2026-09-18T09:00:00", "is_test": False},
+        ]
+    )
+
+    assert trend == [
+        {"date": "2026-09-17", "count": 2, "cumulative_count": 2},
+        {"date": "2026-09-18", "count": 1, "cumulative_count": 3},
+    ]
+
+
+def test_admin_browse_responses_count_as_valid_samples(tmp_path) -> None:
+    database = ResearchDatabase(str(tmp_path / "survey.sqlite"))
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"])],
+        "大学生消费情况调查",
+        "消费偏好",
+        llm_service=FakeLLMService(),
+    )
+    survey_id = database.save_survey(survey, status="collecting")
+    response = build_response(survey, {"q1": "100"}, "探索型")
+    preview_id = database.save_response(
+        response,
+        survey_id,
+        source="admin_preview",
+        browser_id_hash="preview-device",
+        is_test=True,
+    )
+    database.save_response(response, survey_id, source="public_link", is_test=False)
+
+    assert len(database.list_responses(survey_id)) == 2
+    assert database.list_surveys()[0]["response_count"] == 2
+    assert database.has_duplicate_response(
+        survey_id,
+        browser_id_hash="preview-device",
+    ) is True
+
+    database.mark_response_invalid(preview_id, invalid=True, reason="管理员确认无效")
+    assert len(database.list_responses(survey_id)) == 1
+
+
 def test_database_trash_restore_and_permanent_delete(tmp_path) -> None:
     database = ResearchDatabase(str(tmp_path / "survey.sqlite"))
     survey = build_wrapped_survey(
@@ -750,13 +818,13 @@ def test_database_trash_restore_and_permanent_delete(tmp_path) -> None:
     trashed = database.move_survey_to_trash(survey_id)
 
     assert trashed["deleted_at"]
-    assert database.list_surveys(status="open") == []
+    assert database.list_surveys(status="draft") == []
     assert database.list_surveys(deleted=True)[0]["id"] == survey_id
 
     restored = database.restore_survey(survey_id)
 
     assert restored["deleted_at"] is None
-    assert database.list_surveys(status="open")[0]["id"] == survey_id
+    assert database.list_surveys(status="draft")[0]["id"] == survey_id
     assert database.permanently_delete_survey(survey_id) is False
 
     database.move_survey_to_trash(survey_id)

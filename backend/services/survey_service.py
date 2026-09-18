@@ -553,7 +553,7 @@ def _looks_like_wjx_unavailable_page(content: str) -> bool:
         for marker in (
             "checkstatus.aspx",
             "问卷已停止",
-            "问卷已暂停",
+            "问卷已停止收集",
             "问卷不存在",
             "当前问卷",
             "停止收集",

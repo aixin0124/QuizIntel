@@ -1,24 +1,35 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as echarts from "echarts";
-import { BarChart3, BookOpen, CheckCircle2, Copy, Database, ExternalLink, FileDown, FileSpreadsheet, FileText, KeyRound, LayoutDashboard, Link2, LoaderCircle, LockKeyhole, LogOut, Play, Plus, QrCode, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
+import { BarChart3, BookOpen, CheckCircle2, Copy, Database, ExternalLink, FileDown, FileSpreadsheet, FileText, KeyRound, LayoutDashboard, Link2, LoaderCircle, LockKeyhole, LogOut, Plus, QrCode, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
+import { adminDeleteJson, adminFetchJson, adminPostJson, postJson } from "./api/client";
+import { AnalyticsExtras } from "./components/AnalyticsExtras";
+import { ChartCard as SharedChartCard } from "./components/Charts";
+import { ArchiveSurveyAction, PublicationControls } from "./components/PublicationControls";
+import { QuestionEditor as SharedQuestionEditor } from "./components/QuestionEditor";
+import { ResponseTable } from "./components/ResponseTable";
+import { SecurityPanel } from "./components/SecurityPanel";
+import { WrappedSurveyEditor } from "./components/WrappedSurveyEditor";
+import { AdminPortalLayout } from "./pages/AdminPortal";
+import { UserPortal as UserPortalPage } from "./pages/UserPortal";
 import "./styles.css";
 
-type SurveyQuestion = { question_id: string; text: string; question_type: string; options: string[]; research_tag: string; required: boolean };
-type WrappedQuestion = { question_id: string; public_text: string; question_type: string; options: string[]; research_tag: string; source_text: string; required: boolean; research_refs?: string[]; rationale?: string };
-type DimensionBreakdown = { key: string; name: string; score: number; signal: string; description: string };
-type ResultAnalysis = { summary: string; personality_reference?: string; dimension_breakdown: DimensionBreakdown[]; evidence: Array<{ question: string; answer: string; reason: string; rationale?: string }>; strengths: string[]; watchouts: string[]; advice: string };
-type ResultPayload = { name: string; description: string; strengths?: string[]; watchouts?: string[]; advice?: string; dimension_scores?: Record<string, number>; analysis?: ResultAnalysis };
-type WrappedSurvey = { survey_name: string; theme: string; tagline: string; intro: string; disclosure: string; result_types: Array<{ name: string; description: string }>; questions: WrappedQuestion[]; brand_goal: string; source: string; dimensions?: Array<{ key: string; name: string; description: string; high_pole: string; low_pole: string }>; analysis_method?: string };
-type SurveySummary = { id: number; survey_name: string; theme: string; source: string; created_at: string; response_count: number; status: "open" | "ended"; ended_at?: string | null; deleted_at?: string | null; share_token?: string | null };
-type PublicSurveyData = { id: number; share_token?: string | null; survey: WrappedSurvey };
-type AnalyticsSummary = { response_count: number; result_counts: Record<string, number>; option_counts: Record<string, Record<string, number>>; research_tags: string[]; dimension_stats?: DimensionStat[]; question_stats?: QuestionStat[] };
-type DimensionStat = { key: string; name: string; description: string; high_pole?: string; low_pole?: string; score?: number | null; index?: number | null; positive_count?: number | null; neutral_count?: number | null; negative_count?: number | null; coverage_count: number; mapped_question_ids: string[]; mapped_research_tags: string[]; conclusion?: string };
-type QuestionStat = { question_id: string; question: string; research_tag: string; answered_count: number; answer_rate: number; options: Array<{ option: string; count: number; percentage: number }>; dimension_keys: string[] };
-type ResearchAnalysis = { generated_at: string; research_goal: string; theme: string; response_count: number; result_counts: Record<string, number>; research_tags: string[]; dimensions: DimensionStat[]; questions: QuestionStat[]; key_findings: string[]; research_conclusion: string; long_summary: string; limitations: string; analysis_method: string };
-type GenerationStep = { title: string; detail: string };
-type SurveyTemplate = { id: string; title: string; category: string; sourceUrl: string; summary: string; goal: string; themeHint: string };
-type ImportSurveyResponse = { title: string; source_url?: string; questions: SurveyQuestion[] };
+import type {
+  AnalyticsPayload,
+  AnalyticsSummary,
+  DimensionBreakdown,
+  GenerationStep,
+  ImportSurveyResponse,
+  ResearchAnalysis,
+  ResponseRow,
+  ResultPayload,
+  SurveyQuestion,
+  SurveyStatus,
+  SurveySummary,
+  SurveyTemplate,
+  WrappedQuestion,
+  WrappedSurvey,
+} from "./types";
 
 const recommendedSurveyTemplates: SurveyTemplate[] = [
   { id: "travel", title: "旅游调查问卷", category: "消费与旅游", sourceUrl: "https://www.wenjuan.com/lib_detail_full/6125dcc62bc3caa35810da45/", summary: "围绕旅游频率、出游原因、目的地偏好和消费安排。", goal: "了解用户旅游偏好、出游动机、消费支出和服务期待，为旅游产品与体验优化提供依据", themeHint: "旅行决策风格测评" },
@@ -61,25 +72,15 @@ const seenHeadlinesStorageKey = "fun_research_seen_headlines";
 const headlineApiUrl = "https://api.zxki.cn/api/jhrs?type=douyin";
 
 function App() {
-  const [mode, setMode] = useState<"user" | "admin">("user");
   const [adminToken, setAdminToken] = useState(() => sessionStorage.getItem("admin_token") || "");
+  const [adminRole, setAdminRole] = useState(() => sessionStorage.getItem("admin_role") || "admin");
   const shareToken = getShareTokenFromLocation();
-  function logout() { sessionStorage.removeItem("admin_token"); setAdminToken(""); setMode("user"); }
+  const isUserPortal = getAdminUserPortalFromLocation();
+  function logout() { sessionStorage.removeItem("admin_token"); sessionStorage.removeItem("admin_role"); setAdminToken(""); setAdminRole("admin"); }
   return <main>
-    <header className="topbar"><button className="brand" onClick={() => setMode("user")} aria-label="返回用户端">趣测智研 <span>FUN RESEARCH</span></button>{!shareToken && <nav className="main-nav"><button className={mode === "user" ? "active" : ""} onClick={() => setMode("user")}><Users size={16} /> 用户端</button><button className={mode === "admin" ? "active" : ""} onClick={() => setMode("admin")}><LayoutDashboard size={16} /> 管理后台</button>{adminToken && <button className="icon-button" onClick={logout} title="退出管理后台" aria-label="退出管理后台"><LogOut size={17} /></button>}</nav>}</header>
-    {shareToken || mode === "user" ? <UserPortal shareToken={shareToken} /> : adminToken ? <AdminPortal token={adminToken} /> : <AdminLogin onLogin={setAdminToken} />}
+    <header className="topbar"><button className="brand" onClick={() => window.location.assign("/portal")} aria-label="返回用户端">趣测智研 <span>FUN RESEARCH</span></button>{!shareToken && <nav className="main-nav">{adminToken && <button className={isUserPortal ? "active" : ""} onClick={() => window.location.assign("/portal")}><Users size={16} /> 用户端</button>}<button className={!isUserPortal ? "active" : ""} onClick={() => window.location.assign("/")}><LayoutDashboard size={16} /> 管理后台</button>{adminToken && <button className="icon-button" onClick={logout} title="退出管理后台" aria-label="退出管理后台"><LogOut size={17} /></button>}</nav>}</header>
+    {shareToken ? <UserPortalPage shareToken={shareToken} renderResult={(result) => <ResultPanel result={result} />} /> : isUserPortal ? (adminToken ? <UserPortalPage adminBrowse token={adminToken} renderResult={(result) => <ResultPanel result={result} />} /> : <AdminLogin onLogin={(token, role) => { setAdminToken(token); setAdminRole(role); }} />) : adminToken ? <AdminPortal token={adminToken} role={adminRole} onLogout={logout} /> : <AdminLogin onLogin={(token, role) => { setAdminToken(token); setAdminRole(role); }} />}
   </main>;
-}
-
-function UserPortal({ shareToken }: { shareToken?: string | null }) {
-  const [surveys, setSurveys] = useState<SurveySummary[]>([]); const [selected, setSelected] = useState<{ id: number; survey: WrappedSurvey } | null>(null); const [answers, setAnswers] = useState<Record<string, unknown>>({}); const [result, setResult] = useState<ResultPayload | null>(null); const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false);
-  useEffect(() => { void loadPublicSurveys(); }, [shareToken]);
-  async function loadPublicSurveys() { try { if (shareToken) { await openSharedSurvey(shareToken); return; } const data = await fetchJson<{ items: SurveySummary[] }>("/api/public/surveys"); setSurveys(data.items); if (data.items.length) await openSurvey(data.items[0].id); } catch (error) { setMessage(getErrorMessage(error)); } }
-  async function openSurvey(id: number) { setLoading(true); setMessage(""); try { const data = await fetchJson<PublicSurveyData>(`/api/public/surveys/${id}`); setSelected(data); setAnswers({}); setResult(null); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
-  async function openSharedSurvey(token: string) { setLoading(true); setMessage(""); try { const data = await fetchJson<PublicSurveyData>(`/api/public/share/${encodeURIComponent(token)}`); setSurveys([]); setSelected(data); setAnswers({}); setResult(null); } catch (error) { setSelected(null); setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
-  async function submitAnswers() { if (!selected) return; if (!isSurveyComplete(selected.survey, answers)) { setMessage("请完成所有必答题后再提交。"); return; } setLoading(true); setMessage(""); try { const data = await postJson<{ result: ResultPayload }>("/api/responses", { survey_id: selected.id, answers }); setResult(data.result); setMessage("答卷已提交，感谢你的参与。"); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
-  const completion = useMemo(() => { if (!selected) return 0; const required = selected.survey.questions.filter((question) => question.required); const answered = required.filter((question) => isAnswerPresent(answers[question.question_id])).length; return required.length ? Math.round((answered / required.length) * 100) : 100; }, [answers, selected]);
-  return <><section className="hero compact-hero"><div><p className="eyebrow">INTERACTIVE RESEARCH</p><h1>用一分钟，完成一次有趣的市场调研。</h1><p>{shareToken ? "这是一份通过专属分享链接打开的测评，按直觉作答即可。" : "选择一份测评，按直觉作答。你的答案将帮助品牌更好地理解真实需求。"}</p></div><div className="heroPanel user-hero-panel"><Sparkles size={23} /><strong>轻松作答，真实反馈</strong><span>本页面不收集姓名、手机号等直接身份信息。</span></div></section>{message && <div className="notice">{message}</div>}<section className={`user-layout ${shareToken ? "shared-layout" : ""}`}>{!shareToken && <aside className="survey-list panel"><div className="section-heading"><div><p className="eyebrow">SURVEYS</p><h2>可参与的测评</h2></div><Database size={20} /></div>{!surveys.length ? <Empty text="暂无已发布的测评，请由管理后台先生成一个。" /> : surveys.map((item) => <button key={item.id} className={`survey-item ${selected?.id === item.id ? "selected" : ""}`} onClick={() => void openSurvey(item.id)}><span>{item.theme}</span><strong>{item.survey_name}</strong><small>{item.response_count} 人已完成</small></button>)}</aside>}<section className="testSurface user-surface">{!selected ? <Empty text={loading ? "正在读取分享问卷..." : shareToken ? "分享问卷暂时不可用。" : "请选择左侧测评开始体验。"} /> : <><p className="eyebrow">{selected.survey.theme}</p><h2>{selected.survey.survey_name}</h2><p className="lead">{selected.survey.tagline}</p><p className="intro">{selected.survey.intro}</p><div className="disclosure">{selected.survey.disclosure}</div><div className="progress-label"><span>完成进度</span><b>{completion}%</b></div><div className="progress"><span style={{ width: `${completion}%` }} /></div>{selected.survey.questions.map((question, index) => <QuestionInput key={question.question_id} index={index + 1} question={question} value={answers[question.question_id]} onChange={(value) => setAnswers({ ...answers, [question.question_id]: value })} />)}<button className="primary wide" onClick={() => void submitAnswers()} disabled={loading || completion < 100}><Play size={18} /> {loading ? "提交中..." : "查看我的结果"}</button>{result && <ResultPanel result={result} />}</>}</section></section></>;
 }
 
 function ResultPanel({ result }: { result: ResultPayload }) {
@@ -185,34 +186,245 @@ function getResultMatchIndex(dimensions: DimensionBreakdown[]) {
   return Math.max(59, Math.min(98, Math.round(72 + averageStrength * 26)));
 }
 
-function AdminLogin({ onLogin }: { onLogin: (token: string) => void }) {
-  const [password, setPassword] = useState(""); const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false);
-  async function login(event: React.FormEvent) { event.preventDefault(); setLoading(true); setMessage(""); try { const data = await postJson<{ token: string }>("/api/admin/login", { password }); sessionStorage.setItem("admin_token", data.token); onLogin(data.token); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
-  return <section className="login-wrap"><form className="login-panel" onSubmit={login}><div className="login-icon"><ShieldCheck size={25} /></div><p className="eyebrow">RESEARCH CONSOLE</p><h1>管理后台</h1><p>登录后管理问卷包装、查看题目映射和分析答卷数据。</p><label htmlFor="admin-password">后台密码</label><div className="password-input"><KeyRound size={17} /><input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入后台密码" autoFocus /></div>{message && <div className="form-error">{message}</div>}<button className="primary wide" type="submit" disabled={loading || !password}>{loading ? "登录中..." : "进入管理后台"}</button></form></section>;
+function AdminLogin({ onLogin }: { onLogin: (token: string, role: string) => void }) {
+  const [username, setUsername] = useState("admin"); const [password, setPassword] = useState(""); const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false);
+  async function login(event: React.FormEvent) { event.preventDefault(); setLoading(true); setMessage(""); try { const data = await postJson<{ token: string; role?: string }>("/api/admin/login", { username, password }); const role = data.role || "admin"; sessionStorage.setItem("admin_token", data.token); sessionStorage.setItem("admin_role", role); onLogin(data.token, role); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
+  return <section className="login-wrap"><form className="login-panel" onSubmit={login}><div className="login-icon"><ShieldCheck size={25} /></div><p className="eyebrow">RESEARCH CONSOLE</p><h1>管理后台</h1><p>登录后管理问卷包装、查看题目映射和分析答卷数据。</p><label htmlFor="admin-username">管理员账号</label><div className="password-input"><Users size={17} /><input id="admin-username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="admin" autoFocus /></div><label htmlFor="admin-password">登录密码</label><div className="password-input"><KeyRound size={17} /><input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" /></div>{message && <div className="form-error">{message}</div>}<button className="primary wide" type="submit" disabled={loading || !username.trim() || !password}>{loading ? "登录中..." : "进入管理后台"}</button></form></section>;
 }
 
-function AdminPortal({ token }: { token: string }) {
-  const [active, setActive] = useState<"overview" | "create" | "mapping" | "analysis" | "trash">("overview"); const [surveys, setSurveys] = useState<SurveySummary[]>([]); const [trashItems, setTrashItems] = useState<SurveySummary[]>([]); const [selectedId, setSelectedId] = useState<number | null>(null); const [shareToken, setShareToken] = useState<string | null>(null); const [survey, setSurvey] = useState<WrappedSurvey | null>(null); const [summary, setSummary] = useState<AnalyticsSummary | null>(null); const [analysis, setAnalysis] = useState<ResearchAnalysis | null>(null); const [surveyStatus, setSurveyStatus] = useState<"open" | "ended">("open"); const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false); const [finishing, setFinishing] = useState(false); const [trashLoading, setTrashLoading] = useState(false);
-  async function loadSurveys() { try { const data = await adminFetchJson<{ items: SurveySummary[] }>("/api/surveys", token); setSurveys(data.items); if (data.items.length && !selectedId) await selectSurvey(data.items[0].id); } catch (error) { setMessage(getErrorMessage(error)); } }
-  async function loadTrash() { setTrashLoading(true); setMessage(""); try { const data = await adminFetchJson<{ items: SurveySummary[] }>("/api/surveys/trash", token); setTrashItems(data.items); } catch (error) { setMessage(getErrorMessage(error)); } finally { setTrashLoading(false); } }
-  async function selectSurvey(id: number) { setLoading(true); setMessage(""); try { const [surveyData, analyticsData] = await Promise.all([adminFetchJson<{ payload: WrappedSurvey; status: "open" | "ended"; share_token?: string | null }>(`/api/surveys/${id}`, token), adminFetchJson<{ summary: AnalyticsSummary; analysis: ResearchAnalysis | null; status: "open" | "ended" }>(`/api/analytics/${id}`, token)]); setSelectedId(id); setShareToken(surveyData.share_token || null); setSurvey(surveyData.payload); setSummary(analyticsData.summary); setAnalysis(analyticsData.analysis); setSurveyStatus(analyticsData.status); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
-  async function moveToTrash(item: SurveySummary) { if (!window.confirm(`确定将“${item.survey_name}”移入回收站吗？`)) return; try { await adminDeleteJson(`/api/surveys/${item.id}`, token); const next = surveys.filter((surveyItem) => surveyItem.id !== item.id); setSurveys(next); setTrashItems((items) => [{ ...item, deleted_at: new Date().toISOString() }, ...items]); if (selectedId === item.id) { setSelectedId(null); setShareToken(null); setSurvey(null); setSummary(null); setAnalysis(null); setActive("overview"); if (next.length) await selectSurvey(next[0].id); } setMessage("问卷已移入回收站。"); } catch (error) { setMessage(getErrorMessage(error)); } }
-  async function restoreFromTrash(item: SurveySummary) { try { await adminPostJson(`/api/surveys/${item.id}/restore`, {}, token); setTrashItems((items) => items.filter((trashItem) => trashItem.id !== item.id)); setSurveys((items) => [{ ...item, deleted_at: null }, ...items]); setMessage("问卷已恢复到已保存问卷。"); } catch (error) { setMessage(getErrorMessage(error)); } }
-  async function permanentlyDelete(item: SurveySummary) { if (!window.confirm(`“${item.survey_name}”及其答卷数据将永久删除，确定继续吗？`)) return; try { await adminDeleteJson(`/api/surveys/${item.id}/permanent`, token); setTrashItems((items) => items.filter((trashItem) => trashItem.id !== item.id)); setMessage("问卷已永久删除。"); } catch (error) { setMessage(getErrorMessage(error)); } }
-  async function finishSurvey() { if (!selectedId || !summary?.response_count) { setMessage("至少收集 1 份有效答卷后才能开始数据分析。"); return; } setFinishing(true); setMessage(""); try { const data = await adminPostJson<{ status: "ended"; ended_at: string; analysis: ResearchAnalysis }>(`/api/analytics/${selectedId}/finish`, {}, token); setSurveyStatus(data.status); setAnalysis(data.analysis); setSurveys((items) => items.map((item) => item.id === selectedId ? { ...item, status: data.status, ended_at: data.ended_at } : item)); setActive("analysis"); setMessage("问卷已结束，AI 数据分析已生成。"); } catch (error) { setMessage(getErrorMessage(error)); } finally { setFinishing(false); } }
-  async function renameSurvey(surveyName: string) { if (!selectedId) return; try { const data = await adminPostJson<{ survey: WrappedSurvey }>(`/api/surveys/${selectedId}/title`, { survey_name: surveyName }, token); setSurvey(data.survey); setSurveys((items) => items.map((item) => item.id === selectedId ? { ...item, survey_name: data.survey.survey_name } : item)); setMessage("问卷标题已更新。"); } catch (error) { setMessage(getErrorMessage(error)); throw error; } }
+function AdminPortal({ token, role, onLogout }: { token: string; role: string; onLogout: () => void }) {
+  const canManage = role === "admin";
+  const [active, setActive] = useState<"overview" | "create" | "mapping" | "editor" | "responses" | "analysis" | "security" | "trash">("overview");
+  const [surveys, setSurveys] = useState<SurveySummary[]>([]);
+  const [trashItems, setTrashItems] = useState<SurveySummary[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedMeta, setSelectedMeta] = useState<SurveySummary | null>(null);
+  const [shareToken, setShareToken] = useState<string | null>(null);
+  const [survey, setSurvey] = useState<WrappedSurvey | null>(null);
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [analysis, setAnalysis] = useState<ResearchAnalysis | null>(null);
+  const [responseRows, setResponseRows] = useState<ResponseRow[]>([]);
+  const [surveyStatus, setSurveyStatus] = useState<SurveyStatus>("draft");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [finishing, setFinishing] = useState(false);
+  const [trashLoading, setTrashLoading] = useState(false);
+
+  async function loadSurveys() {
+    try {
+      const data = await adminFetchJson<{ items: SurveySummary[] }>("/api/surveys", token);
+      setSurveys(data.items);
+      if (data.items.length && !selectedId) await selectSurvey(data.items[0].id);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  async function loadTrash() {
+    setTrashLoading(true);
+    setMessage("");
+    try {
+      const data = await adminFetchJson<{ items: SurveySummary[] }>("/api/surveys/trash", token);
+      setTrashItems(data.items);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setTrashLoading(false);
+    }
+  }
+
+  async function selectSurvey(id: number) {
+    setLoading(true);
+    setMessage("");
+    try {
+      const [surveyData, analyticsData] = await Promise.all([
+        adminFetchJson<SurveySummary & { payload: WrappedSurvey }>(`/api/surveys/${id}`, token),
+        adminFetchJson<AnalyticsPayload>(`/api/analytics/${id}`, token),
+      ]);
+      setSelectedId(id);
+      setSelectedMeta(surveyData);
+      setShareToken(surveyData.share_token || null);
+      setSurvey(surveyData.payload);
+      setSummary(analyticsData.summary);
+      setAnalysis(analyticsData.analysis);
+      setResponseRows(analyticsData.responses);
+      setSurveyStatus(analyticsData.status);
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function moveToTrash(item: SurveySummary) {
+    if (!canManage || !window.confirm(`确定将“${item.survey_name}”移入回收站吗？`)) return;
+    try {
+      await adminDeleteJson(`/api/surveys/${item.id}`, token);
+      const next = surveys.filter((surveyItem) => surveyItem.id !== item.id);
+      setSurveys(next);
+      setTrashItems((items) => [{ ...item, deleted_at: new Date().toISOString() }, ...items]);
+      if (selectedId === item.id) {
+        setSelectedId(null);
+        setSelectedMeta(null);
+        setShareToken(null);
+        setSurvey(null);
+        setSummary(null);
+        setAnalysis(null);
+        setResponseRows([]);
+        setActive("overview");
+        if (next.length) await selectSurvey(next[0].id);
+      }
+      setMessage("问卷已移入回收站。");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  async function restoreFromTrash(item: SurveySummary) {
+    if (!canManage) return;
+    try {
+      await adminPostJson(`/api/surveys/${item.id}/restore`, {}, token);
+      setTrashItems((items) => items.filter((trashItem) => trashItem.id !== item.id));
+      setSurveys((items) => [{ ...item, deleted_at: null }, ...items]);
+      setMessage("问卷已恢复到已保存问卷。");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  async function permanentlyDelete(item: SurveySummary) {
+    if (!canManage || !window.confirm(`“${item.survey_name}”及其答卷数据将永久删除，确定继续吗？`)) return;
+    try {
+      await adminDeleteJson(`/api/surveys/${item.id}/permanent`, token);
+      setTrashItems((items) => items.filter((trashItem) => trashItem.id !== item.id));
+      setMessage("问卷已永久删除。");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    }
+  }
+
+  async function generateAnalysis() {
+    if (!canManage || !selectedId || surveyStatus !== "ended" || !summary?.response_count) {
+      setMessage("请先结束问卷，并确保至少有 1 份有效答卷。");
+      return;
+    }
+    setFinishing(true);
+    setMessage("");
+    try {
+      const data = await adminPostJson<{ status: "ended"; ended_at: string; analysis: ResearchAnalysis }>(`/api/analytics/${selectedId}/finish`, {}, token);
+      setAnalysis(data.analysis);
+      setActive("analysis");
+      setMessage("数据分析已生成。");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+    } finally {
+      setFinishing(false);
+    }
+  }
+
+  function handlePublicationSaved(item: SurveySummary, nextAnalysis?: ResearchAnalysis | null) {
+    setSurveyStatus(item.status);
+    setSelectedMeta((current) => current ? { ...current, ...item } : item);
+    setSurveys((items) => items.map((surveyItem) => surveyItem.id === item.id ? { ...surveyItem, ...item } : surveyItem));
+    if (nextAnalysis) {
+      setAnalysis(nextAnalysis);
+      setActive("analysis");
+      setMessage("AI 数据分析已生成。");
+    }
+  }
+
+  async function renameSurvey(surveyName: string) {
+    if (!canManage || !selectedId) return;
+    try {
+      const data = await adminPostJson<{ survey: WrappedSurvey }>(`/api/surveys/${selectedId}/title`, { survey_name: surveyName }, token);
+      setSurvey(data.survey);
+      setSurveys((items) => items.map((item) => item.id === selectedId ? { ...item, survey_name: data.survey.survey_name } : item));
+      setSelectedMeta((item) => item ? { ...item, survey_name: data.survey.survey_name } : item);
+      setMessage("问卷标题已更新。");
+    } catch (error) {
+      setMessage(getErrorMessage(error));
+      throw error;
+    }
+  }
+
   useEffect(() => { void loadSurveys(); void loadTrash(); }, []);
-  function onCreated(id: number, createdSurvey: WrappedSurvey, createdShareToken?: string | null) { setSurveys((items) => [{ id, survey_name: createdSurvey.survey_name, theme: createdSurvey.theme, source: createdSurvey.source, created_at: new Date().toISOString(), response_count: 0, status: "open", share_token: createdShareToken || null }, ...items]); setSelectedId(id); setShareToken(createdShareToken || null); setSurvey(createdSurvey); setSummary({ response_count: 0, result_counts: {}, option_counts: {}, research_tags: createdSurvey.questions.map((question) => question.research_tag).filter(Boolean) }); setAnalysis(null); setSurveyStatus("open"); setActive("mapping"); }
-  return <><section className="admin-head"><div><p className="eyebrow">ADMINISTRATION</p><h1>研究数据工作台</h1><p>管理互动问卷，追踪研究字段，导出可提交的调研报告。</p></div><div className="admin-status"><span className="status-dot" /> 本地数据库已连接</div></section>{message && <div className="notice">{message}</div>}<div className="admin-shell"><aside className="admin-sidebar"><button className={active === "overview" ? "active" : ""} onClick={() => setActive("overview")}><LayoutDashboard size={17} /> 数据总览</button><button className={active === "create" ? "active" : ""} onClick={() => setActive("create")}><Plus size={17} /> 创建包装</button><button className={active === "mapping" ? "active" : ""} onClick={() => setActive("mapping")} disabled={!survey}><Database size={17} /> 题目映射</button><button className={active === "analysis" ? "active" : ""} onClick={() => setActive("analysis")} disabled={!survey}><FileText size={17} /> 问卷数据分析</button><button className={active === "trash" ? "active" : ""} onClick={() => { setActive("trash"); void loadTrash(); }}><Trash2 size={17} /> 回收站 <span className="trash-count">{trashItems.length}</span></button><div className="sidebar-divider" /><p>已保存问卷</p>{!surveys.length ? <span className="sidebar-empty">暂无已保存问卷</span> : surveys.map((item) => <button className={`sidebar-survey ${selectedId === item.id ? "selected" : ""}`} key={item.id} onClick={(event) => { const target = event.target as HTMLElement; if (target.closest("[data-delete-survey]")) { event.stopPropagation(); void moveToTrash(item); return; } void selectSurvey(item.id); }}><span>{item.theme}<em className={`survey-status ${item.status}`}>{item.status === "ended" ? "已结束" : "开放中"}</em></span><strong>{item.survey_name}</strong><span data-delete-survey className="sidebar-delete-action" title="移入回收站" aria-label={`将${item.survey_name}移入回收站`}><Trash2 size={15} /></span></button>)}</aside><section className="admin-content">{active === "create" ? <CreateWorkspace token={token} onCreated={onCreated} /> : active === "mapping" && survey ? <MappingView survey={survey} /> : active === "analysis" && survey ? <AnalysisView survey={survey} summary={summary} analysis={analysis} status={surveyStatus} token={token} selectedId={selectedId} /> : active === "trash" ? <TrashView items={trashItems} loading={trashLoading} onRestore={restoreFromTrash} onPermanentDelete={permanentlyDelete} /> : <Dashboard survey={survey} summary={summary} surveyCount={surveys.length} loading={loading} token={token} selectedId={selectedId} shareToken={shareToken} status={surveyStatus} finishing={finishing} onFinish={finishSurvey} onRename={renameSurvey} />}</section></div></>;
+
+  function onCreated(id: number, createdSurvey: WrappedSurvey, createdShareToken?: string | null) {
+    const item: SurveySummary = { id, survey_name: createdSurvey.survey_name, theme: createdSurvey.theme, source: createdSurvey.source, created_at: new Date().toISOString(), response_count: 0, status: "draft", share_token: createdShareToken || null };
+    setSurveys((items) => [item, ...items]);
+    setSelectedId(id);
+    setSelectedMeta(item);
+    setShareToken(createdShareToken || null);
+    setSurvey(createdSurvey);
+    setSummary({ response_count: 0, result_counts: {}, option_counts: {}, research_tags: createdSurvey.questions.map((question) => question.research_tag).filter(Boolean) });
+    setResponseRows([]);
+    setAnalysis(null);
+    setSurveyStatus("draft");
+    setActive("editor");
+  }
+
+  return <AdminPortalLayout role={role}><aside className="admin-sidebar">
+    <button className={active === "overview" ? "active" : ""} onClick={() => setActive("overview")}><LayoutDashboard size={17} /> 数据总览</button>
+    <button className={active === "create" ? "active" : ""} onClick={() => setActive("create")} disabled={!canManage}><Plus size={17} /> 创建包装</button>
+    <button className={active === "editor" ? "active" : ""} onClick={() => setActive("editor")} disabled={!survey || !selectedId}><Save size={17} /> 互动题面</button>
+    <button className={active === "mapping" ? "active" : ""} onClick={() => setActive("mapping")} disabled={!survey}><Database size={17} /> 题目映射</button>
+    <button className={active === "responses" ? "active" : ""} onClick={() => setActive("responses")} disabled={!survey}><Users size={17} /> 答卷明细</button>
+    <button className={active === "analysis" ? "active" : ""} onClick={() => setActive("analysis")} disabled={!survey}><FileText size={17} /> 问卷数据分析</button>
+    <button className={active === "security" ? "active" : ""} onClick={() => setActive("security")}><ShieldCheck size={17} /> 账号与安全</button>
+    <button className={active === "trash" ? "active" : ""} onClick={() => { setActive("trash"); void loadTrash(); }}><Trash2 size={17} /> 回收站 <span className="trash-count">{trashItems.length}</span></button>
+    <div className="sidebar-divider" /><p>已保存问卷</p>
+    {!surveys.length ? <span className="sidebar-empty">暂无已保存问卷</span> : surveys.map((item) => <button className={`sidebar-survey ${selectedId === item.id ? "selected" : ""}`} key={item.id} onClick={(event) => { const target = event.target as HTMLElement; if (target.closest("[data-delete-survey]")) { event.stopPropagation(); void moveToTrash(item); return; } void selectSurvey(item.id); }}>
+      <span>{item.theme}<em className={`survey-status ${item.status}`}>{statusLabel(item.status)}</em></span>
+      <strong>{item.survey_name}</strong>
+      {canManage && <span data-delete-survey className="sidebar-delete-action" title="移入回收站" aria-label={`将${item.survey_name}移入回收站`}><Trash2 size={15} /></span>}
+    </button>)}
+  </aside><section className="admin-content">
+    {message && <div className="notice">{message}</div>}
+    {active === "create" ? <CreateWorkspace token={token} onCreated={onCreated} /> :
+      active === "editor" && survey && selectedId ? <WrappedSurveyEditor surveyId={selectedId} survey={survey} token={token} role={role} status={surveyStatus} onSaved={(nextSurvey) => { setSurvey(nextSurvey); setSelectedMeta((item) => item ? { ...item, survey_name: nextSurvey.survey_name, theme: nextSurvey.theme } : item); setSurveys((items) => items.map((item) => item.id === selectedId ? { ...item, survey_name: nextSurvey.survey_name, theme: nextSurvey.theme } : item)); }} /> :
+      active === "mapping" && survey ? <MappingView survey={survey} /> :
+      active === "responses" ? <ResponseTable rows={responseRows} token={token} role={role} onChanged={(rows) => { setResponseRows(rows); if (selectedId) void selectSurvey(selectedId); }} /> :
+      active === "analysis" && survey ? <AnalysisView survey={survey} summary={summary} analysis={analysis} status={surveyStatus} token={token} selectedId={selectedId} role={role} onArchived={handlePublicationSaved} /> :
+      active === "security" ? <SecurityPanel token={token} role={role} /> :
+      active === "trash" ? <TrashView items={trashItems} loading={trashLoading} onRestore={restoreFromTrash} onPermanentDelete={permanentlyDelete} /> :
+      <Dashboard
+        survey={survey}
+        summary={summary}
+        surveyCount={surveys.length}
+        loading={loading}
+        token={token}
+        selectedId={selectedId}
+        shareToken={shareToken}
+        status={surveyStatus}
+        role={role}
+        finishing={finishing}
+        analysis={analysis}
+        onGenerateAnalysis={generateAnalysis}
+        onRename={renameSurvey}
+        publicationControls={survey && selectedId && selectedMeta
+          ? <PublicationControls surveyId={selectedId} token={token} role={role} status={surveyStatus} onSaved={handlePublicationSaved} />
+          : null}
+      />
+    }
+  </section></AdminPortalLayout>;
 }
 
 function TrashView({ items, loading, onRestore, onPermanentDelete }: { items: SurveySummary[]; loading: boolean; onRestore: (item: SurveySummary) => void; onPermanentDelete: (item: SurveySummary) => void }) {
-  return <section><div className="page-title"><div><p className="eyebrow">TRASH / RECOVERY</p><h2>回收站</h2><p>已删除的问卷暂时保留在这里，恢复后可继续管理；永久删除会同时清理答卷和分析结果。</p></div><Trash2 size={26} /></div><div className="trash-note"><strong>数据保留说明</strong><p>移入回收站不会影响历史答卷、AI 分析和导出数据。永久删除后无法恢复，请谨慎操作。</p></div>{loading ? <Empty text="正在读取回收站..." /> : !items.length ? <div className="trash-empty panel"><Trash2 size={26} /><strong>回收站为空</strong><span>从已保存问卷旁边的删除按钮移入的问卷会出现在这里。</span></div> : <div className="trash-list">{items.map((item) => <article className="trash-item" key={item.id}><div className="trash-item-main"><span className="trash-item-theme">{item.theme}<em className={`survey-status ${item.status}`}>{item.status === "ended" ? "已结束" : "开放中"}</em></span><strong>{item.survey_name}</strong><small>原有答卷 {item.response_count} 份 · 删除于 {formatDate(item.deleted_at)}</small></div><div className="trash-item-actions"><button className="secondary" onClick={() => onRestore(item)}><RotateCcw size={16} /> 恢复</button><button className="danger-action" onClick={() => onPermanentDelete(item)}><Trash2 size={16} /> 永久删除</button></div></article>)}</div>}</section>;
+  return <section><div className="page-title"><div><p className="eyebrow">TRASH / RECOVERY</p><h2>回收站</h2><p>已删除的问卷暂时保留在这里，恢复后可继续管理；永久删除会同时清理答卷和分析结果。</p></div><Trash2 size={26} /></div><div className="trash-note"><strong>数据保留说明</strong><p>移入回收站不会影响历史答卷、AI 分析和导出数据。永久删除后无法恢复，请谨慎操作。</p></div>{loading ? <Empty text="正在读取回收站..." /> : !items.length ? <div className="trash-empty panel"><Trash2 size={26} /><strong>回收站为空</strong><span>从已保存问卷旁边的删除按钮移入的问卷会出现在这里。</span></div> : <div className="trash-list">{items.map((item) => <article className="trash-item" key={item.id}><div className="trash-item-main"><span className="trash-item-theme">{item.theme}<em className={`survey-status ${item.status}`}>{statusLabel(item.status)}</em></span><strong>{item.survey_name}</strong><small>原有答卷 {item.response_count} 份 · 删除于 {formatDate(item.deleted_at)}</small></div><div className="trash-item-actions"><button className="secondary" onClick={() => onRestore(item)}><RotateCcw size={16} /> 恢复</button><button className="danger-action" onClick={() => onPermanentDelete(item)}><Trash2 size={16} /> 永久删除</button></div></article>)}</div>}</section>;
 }
 
 function formatDate(value?: string | null) {
   if (!value) return "未知时间";
   return value.replace("T", " ");
+}
+function statusLabel(status: SurveyStatus) {
+  const labels: Record<SurveyStatus, string> = {
+    draft: "草稿",
+    collecting: "收集中",
+    ended: "已结束",
+    archived: "已归档",
+  };
+  return labels[status] || status;
 }
 
 function CreateWorkspace({ token, onCreated }: { token: string; onCreated: (id: number, survey: WrappedSurvey, shareToken?: string | null) => void }) {
@@ -220,7 +432,7 @@ function CreateWorkspace({ token, onCreated }: { token: string; onCreated: (id: 
   async function parseWjx() { const importUrl = normalizeImportUrl(wjxUrl); setLoading(true); setMessage(""); try { const data = await adminPostJson<ImportSurveyResponse>("/api/surveys/parse-wjx", { url: importUrl }, token); setQuestions(data.questions); setBrandGoal(buildDefaultBrandGoal(data.title)); setWjxUrl(data.source_url || importUrl); setMessage(`已导入“${data.title}”，识别 ${data.questions.length} 道题，并已将问卷标题写入调研目标。`); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
   async function importTemplate(template: SurveyTemplate) { setLoading(true); setMessage(""); try { const data = await adminPostJson<ImportSurveyResponse>("/api/surveys/import-template", { url: template.sourceUrl }, token); setQuestions(data.questions); setBrandGoal(`${template.goal}。来源问卷：${data.title}`); setThemeHint(template.themeHint); setWjxUrl(data.source_url || template.sourceUrl); setTemplateDialogOpen(false); setMessage(`已从推荐模板“${template.title}”抓取真实问卷“${data.title}”，识别 ${data.questions.length} 道题。`); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
   async function wrapSurvey() { setLoading(true); setGenerating(true); setMessage(""); try { const data = await adminPostJson<{ id: number; share_token?: string | null; survey: WrappedSurvey }>("/api/surveys/wrap", { questions, brand_goal: brandGoal, theme_hint: themeHint }, token); onCreated(data.id, data.survey, data.share_token); } catch (error) { setMessage(getErrorMessage(error)); } finally { setGenerating(false); setLoading(false); } }
-  return <section><GenerationOverlay visible={generating} /><TemplatePickerModal visible={templateDialogOpen} selected={selectedTemplate} loading={loading} onClose={() => setTemplateDialogOpen(false)} onSelect={setSelectedTemplate} onImport={importTemplate} /><div className="page-title"><div><p className="eyebrow">CREATE A STUDY</p><h2>创建互动包装</h2><p>从真实问卷模板开始，让 AI 围绕主题重新设计互动题和分析维度。</p></div><Sparkles size={26} /></div>{message && <div className="notice">{message}</div>}<div className="workspace two"><div className="panel import-panel"><div className="section-heading"><div><h2><BookOpen size={19} /> 导入问卷</h2><p>推荐先从公开模板库选择一份真实问卷。</p></div><span className="step-number">01</span></div><button className="template-trigger" onClick={() => setTemplateDialogOpen(true)} disabled={loading}><BookOpen size={18} /><span><strong>选择推荐问卷模板</strong><small>内置 {recommendedSurveyTemplates.length} 份公开模板入口，点击后浮窗预览并导入真实题目。</small></span></button><label htmlFor="wjx-url">公开问卷或模板链接</label><div className="url-input-row"><input id="wjx-url" type="url" value={wjxUrl} onChange={(event) => setWjxUrl(event.target.value)} placeholder="v.wjx.cn/vm/xxxxx.aspx 或 wenjuan.com/lib_detail_full/..." /><button className="primary import-action" onClick={() => void parseWjx()} disabled={loading || !wjxUrl.trim()}><Link2 size={16} /> 解析链接</button></div><p className="field-hint">支持问卷星公开填写链接和问卷网公开模板详情页；无法解析需要登录、校验或仅小程序可访问的链接。</p></div><div className="panel"><div className="section-heading"><h2><Sparkles size={19} /> AI 包装设定</h2><span className="step-number">02</span></div><label>调研目标</label><textarea className="short" value={brandGoal} onChange={(event) => setBrandGoal(event.target.value)} placeholder="选择模板或导入公开链接后自动填入，也可以手动补充" /><p className="field-hint">导入问卷后会自动填入来源标题，也可以继续补充调研目标。</p><label>测评主题</label><input value={themeHint} onChange={(event) => setThemeHint(event.target.value)} placeholder="例如：年轻人的口红消费风格、周末旅行决策风格" /><button className="primary" onClick={() => void wrapSurvey()} disabled={!questions.length || !brandGoal.trim() || !themeHint.trim() || loading}>生成互动包装</button></div></div><QuestionEditor questions={questions} onChange={setQuestions} /></section>;
+  return <section><GenerationOverlay visible={generating} /><TemplatePickerModal visible={templateDialogOpen} selected={selectedTemplate} loading={loading} onClose={() => setTemplateDialogOpen(false)} onSelect={setSelectedTemplate} onImport={importTemplate} /><div className="page-title"><div><p className="eyebrow">CREATE A STUDY</p><h2>创建互动包装</h2><p>从真实问卷模板开始，让 AI 围绕主题重新设计互动题和分析维度。</p></div><Sparkles size={26} /></div>{message && <div className="notice">{message}</div>}<div className="workspace two"><div className="panel import-panel"><div className="section-heading"><div><h2><BookOpen size={19} /> 导入问卷</h2><p>推荐先从公开模板库选择一份真实问卷。</p></div><span className="step-number">01</span></div><button className="template-trigger" onClick={() => setTemplateDialogOpen(true)} disabled={loading}><BookOpen size={18} /><span><strong>选择推荐问卷模板</strong><small>内置 {recommendedSurveyTemplates.length} 份公开模板入口，点击后浮窗预览并导入真实题目。</small></span></button><label htmlFor="wjx-url">公开问卷或模板链接</label><div className="url-input-row"><input id="wjx-url" type="url" value={wjxUrl} onChange={(event) => setWjxUrl(event.target.value)} placeholder="v.wjx.cn/vm/xxxxx.aspx 或 wenjuan.com/lib_detail_full/..." /><button className="primary import-action" onClick={() => void parseWjx()} disabled={loading || !wjxUrl.trim()}><Link2 size={16} /> 解析链接</button></div><p className="field-hint">支持问卷星公开填写链接和问卷网公开模板详情页；无法解析需要登录、校验或仅小程序可访问的链接。</p></div><div className="panel"><div className="section-heading"><h2><Sparkles size={19} /> AI 包装设定</h2><span className="step-number">02</span></div><label>调研目标</label><textarea className="short" value={brandGoal} onChange={(event) => setBrandGoal(event.target.value)} placeholder="选择模板或导入公开链接后自动填入，也可以手动补充" /><p className="field-hint">导入问卷后会自动填入来源标题，也可以继续补充调研目标。</p><label>测评主题</label><input value={themeHint} onChange={(event) => setThemeHint(event.target.value)} placeholder="例如：年轻人的口红消费风格、周末旅行决策风格" /><button className="primary" onClick={() => void wrapSurvey()} disabled={!questions.length || !brandGoal.trim() || !themeHint.trim() || loading}>生成互动包装</button></div></div><SharedQuestionEditor questions={questions} onChange={setQuestions} /></section>;
 }
 
 function buildDefaultBrandGoal(surveyTitle = "") {
@@ -318,6 +530,23 @@ function GenerationOverlay({ visible }: { visible: boolean }) {
     <div className="generation-news"><span className="generation-news-label"><Sparkles size={13} /> 当今头条</span><span className="generation-news-text" key={headlines[headlineIndex]}>{headlines[headlineIndex]}</span></div>
     <div className="generation-elapsed"><span>已加载</span><strong>{formatElapsed(elapsedSeconds)}</strong></div>
   </div></div>;
+}
+
+function AnalysisLoadingOverlay({ visible }: { visible: boolean }) {
+  if (!visible) return null;
+  return <div className="generation-overlay" role="status" aria-live="polite">
+    <div className="generation-window analysis-loading-window">
+      <div className="generation-window-top">
+        <div className="generation-icon"><LoaderCircle size={28} /></div>
+        <span className="generation-live"><i /> ANALYSIS</span>
+      </div>
+      <p className="eyebrow">FINAL RESEARCH ANALYSIS</p>
+      <h2>正在生成问卷数据分析</h2>
+      <p className="generation-description">正在锁定当前答卷样本，统计选项分布，并根据题目映射整理研究结论。</p>
+      <div className="analysis-loading-progress" aria-hidden="true"><span /></div>
+      <p className="analysis-loading-note">分析完成前不能修改题目、选项或答卷数据，请稍候。</p>
+    </div>
+  </div>;
 }
 
 function formatElapsed(seconds: number) {
@@ -429,12 +658,34 @@ function shuffle<T>(items: T[]): T[] {
   return result;
 }
 
-function Dashboard({ survey, summary, surveyCount, loading, token, selectedId, shareToken, status, finishing, onFinish, onRename }: { survey: WrappedSurvey | null; summary: AnalyticsSummary | null; surveyCount: number; loading: boolean; token: string; selectedId: number | null; shareToken?: string | null; status: "open" | "ended"; finishing: boolean; onFinish: () => void; onRename: (surveyName: string) => Promise<void> }) {
+function Dashboard({ survey, summary, surveyCount, loading, token, selectedId, shareToken, status, role, finishing, analysis, onGenerateAnalysis, onRename, publicationControls }: { survey: WrappedSurvey | null; summary: AnalyticsSummary | null; surveyCount: number; loading: boolean; token: string; selectedId: number | null; shareToken?: string | null; status: SurveyStatus; role: string; finishing: boolean; analysis: ResearchAnalysis | null; onGenerateAnalysis: () => void; onRename: (surveyName: string) => Promise<void>; publicationControls?: React.ReactNode }) {
   if (!survey || !summary) return <Empty text={loading ? "正在读取数据..." : surveyCount ? "请选择一份问卷查看分析。" : "暂无问卷，请先创建互动包装。"} />;
-  return <section><div className="page-title"><div><p className="eyebrow">OVERVIEW / {survey.theme}</p><SurveyTitleEditor title={survey.survey_name} onSave={onRename} /><p>{survey.tagline}</p></div><span className={`source-badge ${status}`}><span className="status-dot" /> {status === "ended" ? "问卷已结束" : "问卷开放中"}</span></div><SharePanel shareToken={shareToken} surveyName={survey.survey_name} /><div className="survey-control"><div><strong>{status === "ended" ? "数据分析已锁定" : "问卷正在收集答卷"}</strong><p>{status === "ended" ? "问卷已结束，已生成最终分析；后续答卷不会再写入。" : `当前已收集 ${summary.response_count} 份有效答卷，确认样本足够后即可结束问卷并生成 AI 数据分析。`}</p></div>{status === "open" ? <button className="primary" onClick={onFinish} disabled={finishing || summary.response_count < 1}><LockKeyhole size={17} /> {finishing ? "正在分析..." : "问卷份数足够，开始数据分析"}</button> : <span className="ended-mark"><CheckCircle2 size={17} /> 可查看问卷数据分析</span>}</div><div className="metrics"><Metric label="有效答卷" value={summary.response_count} icon={<Users size={18} />} /><Metric label="研究字段" value={summary.research_tags.length} icon={<Database size={18} />} /><Metric label="包装题目" value={survey.questions.length} icon={<Sparkles size={18} />} /><Metric label="结果类型" value={Object.keys(summary.result_counts).length} icon={<BarChart3 size={18} />} /></div><div className="dashboard-grid"><ChartCard title="结果类型分布" subtitle="了解不同趣味结果的占比" option={resultChartOption(summary.result_counts)} /><ChartCard title="答卷完成概况" subtitle="当前包装方案的有效回收量" option={completionChartOption(summary.response_count)} /></div><div className="chart-section"><div className="section-heading"><div><h3>研究选项分布</h3><p>数据按原始题目 ID 与研究标签聚合</p></div><BarChart3 size={20} /></div>{survey.questions.map((question) => <ChartCard key={question.question_id} compact title={question.research_tag || question.source_text} subtitle={`${question.question_id} · ${question.question_type}`} option={barChartOption(question, summary.option_counts[question.question_id] || {})} />)}</div><div className="export-row"><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/excel`, token, "fun_research_data.xlsx")}><FileSpreadsheet size={17} /> 导出 Excel 明细</button><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/pdf`, token, "fun_research_report.pdf")}><FileDown size={17} /> 导出 PDF 报表</button></div></section>;
+  const collecting = status === "collecting";
+  const ended = status === "ended";
+  const finalized = ended || status === "archived";
+  const canManage = role === "admin";
+  const statusTitle = status === "archived" ? "问卷已归档" : ended ? "问卷已结束，等待数据分析" : collecting ? "问卷正在收集答卷" : "问卷仍处于发布前预览阶段";
+  const statusDescription = status === "archived"
+    ? "问卷已归档并锁定，已生成的分析和题面不能再修改。"
+    : status === "ended"
+      ? analysis ? "问卷已结束，答卷数量已锁定；可以查看已生成的数据分析。" : "问卷已结束，答卷数量已锁定；现在可以开始生成数据分析。"
+      : collecting
+        ? `当前已收集 ${summary.response_count} 份有效答卷，结束问卷后才能开始数据分析。`
+        : "AI 生成结果已保存为草稿，确认题面后即可发布并开始收集。";
+  return <section>
+    <AnalysisLoadingOverlay visible={finishing} />
+    <div className="page-title"><div><p className="eyebrow">OVERVIEW / {survey.theme}</p>{canManage ? <SurveyTitleEditor title={survey.survey_name} onSave={onRename} /> : <h2>{survey.survey_name}</h2>}<p>{survey.tagline}</p></div><span className={`source-badge ${status}`}><span className="status-dot" /> {statusLabel(status)}</span></div>
+    <div className="survey-control"><div className="survey-control-copy"><strong>{statusTitle}</strong><p>{statusDescription}</p></div><div className="survey-control-actions publication-actions">{publicationControls}{ended && !analysis && canManage && <button className="primary" onClick={onGenerateAnalysis} disabled={finishing || summary.response_count < 1}><Sparkles size={17} /> {finishing ? "正在分析..." : "开始数据分析"}</button>}{ended && analysis && <span className="ended-mark"><CheckCircle2 size={17} /> 可查看问卷数据分析</span>}{finalized && !canManage && <span className="ended-mark">只读查看</span>}{status === "draft" && !canManage && <span className="ended-mark">只读查看</span>}</div></div>
+    <SharePanel shareToken={shareToken} surveyName={survey.survey_name} active={collecting} />
+    <div className="metrics"><Metric label="有效答卷" value={summary.response_count} icon={<Users size={18} />} /><Metric label="研究字段" value={summary.research_tags.length} icon={<Database size={18} />} /><Metric label="包装题目" value={survey.questions.length} icon={<Sparkles size={18} />} /><Metric label="结果类型" value={Object.keys(summary.result_counts).length} icon={<BarChart3 size={18} />} /></div>
+    <div className="dashboard-grid"><SharedChartCard title="结果类型分布" subtitle="了解不同趣味结果的占比" option={resultChartOption(summary.result_counts)} /><SharedChartCard title="答卷完成概况" subtitle="当前包装方案的有效回收量" option={completionChartOption(summary.response_count)} /></div>
+    <div className="chart-section"><div className="section-heading"><div><h3>研究选项分布</h3><p>数据按原始题目 ID 与研究标签聚合</p></div><BarChart3 size={20} /></div>{survey.questions.map((question) => <SharedChartCard key={question.question_id} compact title={question.research_tag || question.source_text} subtitle={`${question.question_id} · ${question.question_type}`} option={barChartOption(question, summary.option_counts[question.question_id] || {})} />)}</div>
+    <AnalyticsExtras summary={summary} />
+    <div className="export-row"><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/excel`, token, "fun_research_data.xlsx")}><FileSpreadsheet size={17} /> 导出 Excel 明细</button><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/pdf`, token, "fun_research_report.pdf")}><FileDown size={17} /> 导出 PDF 报表</button></div>
+  </section>;
 }
 
-function SharePanel({ shareToken, surveyName }: { shareToken?: string | null; surveyName: string }) {
+function SharePanel({ shareToken, surveyName, active }: { shareToken?: string | null; surveyName: string; active: boolean }) {
   const [copied, setCopied] = useState(false);
   if (!shareToken) return null;
   const shareUrl = buildShareUrl(shareToken);
@@ -444,7 +695,7 @@ function SharePanel({ shareToken, surveyName }: { shareToken?: string | null; su
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1600);
   }
-  return <section className="share-panel"><div className="share-main"><div className="section-heading"><div><p className="eyebrow">SHARE LINK</p><h2><Link2 size={19} /> 问卷分享链接</h2><p>把这个链接或二维码发给用户，对方只会看到“{surveyName}”这一份问卷。</p></div><QrCode size={22} /></div><div className="share-link-row"><input value={shareUrl} readOnly aria-label="问卷分享链接" /><button className="primary" onClick={() => void copyShareLink()}><Copy size={16} /> {copied ? "已复制" : "复制链接"}</button><a className="link-button" href={shareUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} /> 打开链接</a></div></div><div className="qr-box"><img src={qrUrl} alt={`${surveyName} 分享二维码`} /><span>扫码填写</span></div></section>;
+  return <section className="share-panel"><div className="share-main"><div className="section-heading"><div><p className="eyebrow">SHARE LINK</p><h2><Link2 size={19} /> 问卷分享链接</h2><p>{active ? `把这个链接或二维码发给用户，对方只会看到“${surveyName}”这一份问卷。` : "链接已生成但尚未发布，用户打开时不会进入填写。管理员可从顶部用户端浏览已发布问卷。"}</p></div><QrCode size={22} /></div><div className="share-link-row"><input value={shareUrl} readOnly aria-label="问卷分享链接" /><button className="primary" onClick={() => void copyShareLink()}><Copy size={16} /> {copied ? "已复制" : "复制链接"}</button><a className="link-button" href={shareUrl} target="_blank" rel="noreferrer"><ExternalLink size={16} /> 打开分享链接</a></div></div><div className="qr-box"><img src={qrUrl} alt={`${surveyName} 分享二维码`} /><span>{active ? "扫码填写" : "发布后填写"}</span></div></section>;
 }
 
 function SurveyTitleEditor({ title, onSave }: { title: string; onSave: (surveyName: string) => Promise<void> }) {
@@ -465,54 +716,26 @@ function SurveyTitleEditor({ title, onSave }: { title: string; onSave: (surveyNa
   return <form className="title-editor" onSubmit={(event) => void saveTitle(event)}><label htmlFor="survey-title-input">问卷标题</label><div className="title-editor-row"><input id="survey-title-input" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={60} /><button className="primary" type="submit" disabled={saving || !draft.trim() || draft.trim() === title} title="保存标题"><Save size={16} /> {saving ? "保存中..." : "保存"}</button></div></form>;
 }
 
-function AnalysisView({ survey, summary, analysis, status, token, selectedId }: { survey: WrappedSurvey; summary: AnalyticsSummary | null; analysis: ResearchAnalysis | null; status: "open" | "ended"; token: string; selectedId: number | null }) {
-  if (status !== "ended" || !analysis) return <section className="analysis-locked panel"><LockKeyhole size={28} /><p className="eyebrow">ANALYSIS LOCKED</p><h2>问卷还在进行，暂不开放分析数据功能</h2><p>请先在“数据总览”中确认问卷份数足够并点击结束问卷，系统才会调用 AI 生成最终研究分析。</p></section>;
+function AnalysisView({ survey, summary, analysis, status, token, selectedId, role, onArchived }: { survey: WrappedSurvey; summary: AnalyticsSummary | null; analysis: ResearchAnalysis | null; status: SurveyStatus; token: string; selectedId: number | null; role: string; onArchived: (item: SurveySummary) => void }) {
+  if (!["ended", "archived"].includes(status) || !analysis) return <section className="analysis-locked panel"><LockKeyhole size={28} /><p className="eyebrow">ANALYSIS LOCKED</p><h2>问卷还在进行，暂不开放分析数据功能</h2><p>请先在“数据总览”中结束问卷，再点击“开始数据分析”。</p></section>;
   const dimensions = analysis.dimensions || [];
   const questions = analysis.questions || summary?.question_stats || [];
-  return <section><div className="page-title"><div><p className="eyebrow">RESEARCH ANALYSIS / {survey.theme}</p><h2>问卷数据分析</h2><p>以“{analysis.research_goal || survey.brand_goal || survey.theme}”为主要调研目标，结合题目映射综合解读。</p></div><span className="source-badge ended"><span className="status-dot" /> 已结束 · AI 已生成</span></div><div className="analysis-summary"><div className="analysis-summary-title"><div><span>调研目标</span><strong>{analysis.research_goal || survey.brand_goal || survey.theme}</strong></div><span className="analysis-time">生成于 {analysis.generated_at}</span></div><p className="analysis-conclusion">{analysis.research_conclusion}</p><div className="analysis-long-summary"><strong>总结小结</strong><p>{analysis.long_summary}</p></div></div><div className="analysis-findings"><div className="section-heading"><div><h3>关键发现</h3><p>AI 根据准确统计事实提炼的研究启示</p></div><Sparkles size={20} /></div><div className="finding-grid">{analysis.key_findings.map((finding, index) => <article key={`${index}-${finding}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{finding}</p></article>)}</div></div><div className="analysis-section"><div className="section-heading"><div><h3>按映射维度拆分分析</h3><p>维度指数、覆盖答卷和 AI 解释均绑定当前样本</p></div><BarChart3 size={20} /></div><div className="analysis-dimension-list">{dimensions.map((dimension) => <article className="analysis-dimension" key={dimension.key}><div className="analysis-dimension-head"><div><strong>{dimension.name}</strong><span>{dimension.mapped_research_tags.length ? `映射：${dimension.mapped_research_tags.join("、")}` : "主题维度"}</span></div>{dimension.index !== null && dimension.index !== undefined && <b>{dimension.index}</b>}</div>{dimension.index !== null && dimension.index !== undefined && <div className="dimension-scale"><span style={{ width: `${dimension.index}%` }} /></div>}<p>{dimension.conclusion}</p><small>覆盖 {dimension.coverage_count} 份答卷 · 关联 {dimension.mapped_question_ids.length} 道题</small></article>)}</div></div><div className="analysis-section"><div className="section-heading"><div><h3>题目映射与准确数据</h3><p>人数和比例由系统按选项原值统计，AI 不改写数字</p></div><Database size={20} /></div><div className="analysis-data-list">{questions.map((question) => <article className="analysis-question" key={question.question_id}><div className="analysis-question-head"><div><strong>{question.research_tag || question.question}</strong><span>{question.question_id} · 覆盖 {question.answered_count} 份答卷（{question.answer_rate}%）</span></div><span>{question.dimension_keys.length ? `维度：${question.dimension_keys.join("、")}` : "研究字段"}</span></div><p>{question.question}</p><div className="option-stat-list">{question.options.map((option) => <div className="option-stat" key={option.option}><span>{option.option}</span><div className="option-stat-track"><i style={{ width: `${option.percentage}%` }} /></div><b>{option.count} 人 · {option.percentage}%</b></div>)}</div></article>)}</div></div><div className="analysis-limitations"><strong>分析边界</strong><p>{analysis.limitations}</p></div><div className="export-row"><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/excel`, token, "fun_research_data.xlsx")}><FileSpreadsheet size={17} /> 导出 Excel 明细</button><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/pdf`, token, "fun_research_report.pdf")}><FileDown size={17} /> 导出 PDF 报表</button></div></section>;
+  return <section><div className="page-title"><div><p className="eyebrow">RESEARCH ANALYSIS / {survey.theme}</p><h2>问卷数据分析</h2><p>以“{analysis.research_goal || survey.brand_goal || survey.theme}”为主要调研目标，结合题目映射综合解读。</p></div><div className="analysis-page-actions"><span className={`source-badge ${status === "archived" ? "archived" : "ended"}`}><span className="status-dot" /> {status === "archived" ? "已归档 · AI 已生成" : "已结束 · AI 已生成"}</span><ArchiveSurveyAction surveyId={selectedId || 0} token={token} role={role} status={status} onSaved={onArchived} /></div></div><div className="analysis-summary"><div className="analysis-summary-title"><div><span>调研目标</span><strong>{analysis.research_goal || survey.brand_goal || survey.theme}</strong></div><span className="analysis-time">生成于 {analysis.generated_at}</span></div><p className="analysis-conclusion">{analysis.research_conclusion}</p><div className="analysis-long-summary"><strong>总结小结</strong><p>{analysis.long_summary}</p></div></div><div className="analysis-findings"><div className="section-heading"><div><h3>关键发现</h3><p>AI 根据准确统计事实提炼的研究启示</p></div><Sparkles size={20} /></div><div className="finding-grid">{analysis.key_findings.map((finding, index) => <article key={`${index}-${finding}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{finding}</p></article>)}</div></div><div className="analysis-section"><div className="section-heading"><div><h3>按映射维度拆分分析</h3><p>维度指数、覆盖答卷和 AI 解释均绑定当前样本</p></div><BarChart3 size={20} /></div><div className="analysis-dimension-list">{dimensions.map((dimension) => <article className="analysis-dimension" key={dimension.key}><div className="analysis-dimension-head"><div><strong>{dimension.name}</strong><span>{dimension.mapped_research_tags.length ? `映射：${dimension.mapped_research_tags.join("、")}` : "主题维度"}</span></div>{dimension.index !== null && dimension.index !== undefined && <b>{dimension.index}</b>}</div>{dimension.index !== null && dimension.index !== undefined && <div className="dimension-scale"><span style={{ width: `${dimension.index}%` }} /></div>}<p>{dimension.conclusion}</p><small>覆盖 {dimension.coverage_count} 份答卷 · 关联 {dimension.mapped_question_ids.length} 道题</small></article>)}</div></div><div className="analysis-section"><div className="section-heading"><div><h3>题目映射与准确数据</h3><p>人数和比例由系统按选项原值统计，AI 不改写数字</p></div><Database size={20} /></div><div className="analysis-data-list">{questions.map((question) => <article className="analysis-question" key={question.question_id}><div className="analysis-question-head"><div><strong>{question.research_tag || question.question}</strong><span>{question.question_id} · 覆盖 {question.answered_count} 份答卷（{question.answer_rate}%）</span></div><span>{question.dimension_keys.length ? `维度：${question.dimension_keys.join("、")}` : "研究字段"}</span></div><p>{question.question}</p><div className="option-stat-list">{question.options.map((option) => <div className="option-stat" key={option.option}><span>{option.option}</span><div className="option-stat-track"><i style={{ width: `${option.percentage}%` }} /></div><b>{option.count} 人 · {option.percentage}%</b></div>)}</div></article>)}</div></div><div className="analysis-limitations"><strong>分析边界</strong><p>{analysis.limitations}</p></div><div className="export-row"><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/excel`, token, "fun_research_data.xlsx")}><FileSpreadsheet size={17} /> 导出 Excel 明细</button><button onClick={() => selectedId && void downloadReport(`/api/analytics/${selectedId}/pdf`, token, "fun_research_report.pdf")}><FileDown size={17} /> 导出 PDF 报表</button></div></section>;
 }
 
 function MappingView({ survey }: { survey: WrappedSurvey }) { return <section><div className="page-title"><div><p className="eyebrow">TRACEABLE MAPPING</p><h2>研究参考与互动题映射</h2><p>互动题以主题维度为主重新设计，只有相关研究内容才建立映射，不再强行一题对应一题。</p></div><ShieldCheck size={26} /></div>{survey.analysis_method && <div className="method-note"><strong>分析方法</strong><p>{survey.analysis_method}</p></div>}<div className="mapping-list">{survey.questions.map((question, index) => <article className="mapping-row" key={question.question_id}><div className="mapping-index">{String(index + 1).padStart(2, "0")}</div><div><span className="mapping-label">研究参考 · {question.research_tag || "主题原创题"}</span><h3>{question.source_text || "本题由互动主题独立设计"}</h3><small>{question.research_refs?.length ? `关联 ${question.research_refs.join("、")}` : "无直接原题映射"}</small></div><div className="mapping-arrow">→</div><div><span className="mapping-label accent">用户体验题面</span><h3>{question.public_text}</h3><small>{question.options.length ? `${question.options.length} 个选项` : "文本回答"}{question.rationale ? ` · ${question.rationale}` : ""}</small></div></article>)}</div></section>; }
-function QuestionEditor({ questions, onChange }: { questions: SurveyQuestion[]; onChange: (questions: SurveyQuestion[]) => void }) {
-  function updateQuestion(index: number, patch: Partial<SurveyQuestion>) {
-    onChange(questions.map((question, questionIndex) => questionIndex === index ? { ...question, ...patch } : question));
-  }
-  function updateOption(questionIndex: number, optionIndex: number, value: string) {
-    const question = questions[questionIndex];
-    if (!question) return;
-    updateQuestion(questionIndex, { options: question.options.map((option, index) => index === optionIndex ? value : option) });
-  }
-  function addQuestion() {
-    onChange([...questions, { question_id: `q${questions.length + 1}`, text: "", question_type: "single_choice", options: ["", ""], research_tag: "", required: true }]);
-  }
-  function removeQuestion(index: number) {
-    onChange(questions.filter((_, questionIndex) => questionIndex !== index));
-  }
-  function addOption(questionIndex: number) {
-    const question = questions[questionIndex];
-    if (!question) return;
-    updateQuestion(questionIndex, { options: [...question.options, ""] });
-  }
-  function removeOption(questionIndex: number, optionIndex: number) {
-    const question = questions[questionIndex];
-    if (!question) return;
-    updateQuestion(questionIndex, { options: question.options.filter((_, index) => index !== optionIndex) });
-  }
-  return <section className="question-editor panel"><div className="section-heading"><div><h2><Database size={19} /> 已解析题目</h2><p>解析后可直接填写和调整，修改内容会用于生成互动包装。</p></div><button className="secondary compact-action" onClick={addQuestion}><Plus size={16} /> 新增题目</button></div>{!questions.length ? <div className="editor-empty"><p>尚未解析问卷。</p><span>选择推荐模板或粘贴问卷星公开链接后，题目会出现在这里。</span></div> : <div className="editor-list">{questions.map((question, index) => <article className="question-editor-item" key={`${question.question_id}-${index}`}><div className="editor-item-head"><span className="editor-index">{String(index + 1).padStart(2, "0")}</span><strong>第 {index + 1} 题</strong><button className="icon-button subtle-danger" onClick={() => removeQuestion(index)} title="删除题目" aria-label={`删除第 ${index + 1} 题`}><Trash2 size={16} /></button></div><div className="editor-fields"><div><label htmlFor={`question-id-${index}`}>题目编号</label><input id={`question-id-${index}`} value={question.question_id} onChange={(event) => updateQuestion(index, { question_id: event.target.value })} placeholder="例如 q1" /></div><div><label htmlFor={`question-type-${index}`}>题型</label><select id={`question-type-${index}`} value={question.question_type} onChange={(event) => updateQuestion(index, { question_type: event.target.value, options: event.target.value === "text" ? [] : question.options.length ? question.options : ["", ""] })}><option value="single_choice">单选题</option><option value="multiple_choice">多选题</option><option value="text">填空题</option><option value="scale">评分题</option></select></div><label className="required-toggle"><input type="checkbox" checked={question.required} onChange={(event) => updateQuestion(index, { required: event.target.checked })} /> 必答题</label></div><label htmlFor={`question-text-${index}`}>题目内容</label><textarea id={`question-text-${index}`} className="question-text-input" value={question.text} onChange={(event) => updateQuestion(index, { text: event.target.value })} placeholder="填写题目内容" /><div className="editor-fields"><div><label htmlFor={`research-tag-${index}`}>研究标签</label><input id={`research-tag-${index}`} value={question.research_tag} onChange={(event) => updateQuestion(index, { research_tag: event.target.value })} placeholder="例如：价格接受区间" /></div></div>{question.question_type !== "text" && <div className="option-editor"><div className="option-editor-head"><label>选项</label><button className="text-action" onClick={() => addOption(index)}><Plus size={14} /> 添加选项</button></div>{question.options.map((option, optionIndex) => <div className="option-editor-row" key={`${index}-${optionIndex}`}><span>{String.fromCharCode(65 + optionIndex)}</span><input value={option} onChange={(event) => updateOption(index, optionIndex, event.target.value)} placeholder={`填写选项 ${optionIndex + 1}`} /><button className="icon-button" onClick={() => removeOption(index, optionIndex)} title="删除选项" aria-label={`删除第 ${optionIndex + 1} 个选项`} disabled={question.options.length <= 1}><X size={15} /></button></div>)}</div>}</article>)}</div>}</section>;
-}
-function QuestionInput({ index, question, value, onChange }: { index: number; question: WrappedQuestion; value: unknown; onChange: (value: unknown) => void }) { return <div className="question"><div className="question-meta"><span>{String(index).padStart(2, "0")}</span>{question.required && <em>必答</em>}</div><h3>{question.public_text}</h3>{question.question_type === "multiple_choice" ? <div className="options">{question.options.map((option) => { const selected = Array.isArray(value) && value.includes(option); return <button className={selected ? "selected" : ""} key={option} onClick={() => { const current = Array.isArray(value) ? value : []; onChange(selected ? current.filter((item) => item !== option) : [...current, option]); }}>{option}</button>; })}</div> : question.question_type === "text" ? <input value={String(value || "")} onChange={(event) => onChange(event.target.value)} /> : <div className="options">{(question.options.length ? question.options : ["非常不像", "有点像", "很像"]).map((option) => <button className={value === option ? "selected" : ""} key={option} onClick={() => onChange(option)}>{option}</button>)}</div>}</div>; }
 function Metric({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) { return <div className="metric"><span className="metric-icon">{icon}</span><span>{label}</span><strong>{value}</strong></div>; }
-function ChartCard({ title, subtitle, option, compact = false }: { title: string; subtitle: string; option: echarts.EChartsOption; compact?: boolean }) { const ref = useRef<HTMLDivElement>(null); useEffect(() => { if (!ref.current) return; const chart = echarts.init(ref.current); chart.setOption(option); const resize = () => chart.resize(); window.addEventListener("resize", resize); return () => { window.removeEventListener("resize", resize); chart.dispose(); }; }, [option]); return <div className={`chart-card ${compact ? "compact" : ""}`}><div className="chart-card-title"><div><h3>{title}</h3><p>{subtitle}</p></div><BarChart3 size={18} /></div><div className="chart-canvas" ref={ref} /></div>; }
 function resultChartOption(counts: Record<string, number>): echarts.EChartsOption { return { color: ["#2467e8", "#32a287", "#f29d49", "#db5873", "#7b61c9"], tooltip: { trigger: "item" }, legend: { bottom: 0, type: "scroll" }, series: [{ type: "pie", radius: ["42%", "68%"], center: ["50%", "44%"], label: { formatter: "{b}\n{d}%" }, data: Object.entries(counts).map(([name, value]) => ({ name, value })) }] }; }
 function completionChartOption(count: number): echarts.EChartsOption { return { series: [{ type: "gauge", startAngle: 90, endAngle: -270, radius: "78%", pointer: { show: false }, progress: { show: true, width: 15, itemStyle: { color: "#2467e8" } }, axisLine: { lineStyle: { width: 15, color: [[1, "#e4e9f1"]] } }, axisTick: { show: false }, splitLine: { show: false }, axisLabel: { show: false }, detail: { valueAnimation: true, formatter: `${count}\n有效答卷`, fontSize: 20, lineHeight: 30, color: "#18212b" }, data: [{ value: count, name: "" }] }] }; }
 function barChartOption(question: WrappedQuestion, counts: Record<string, number>): echarts.EChartsOption { const labels = question.options.length ? question.options : Object.keys(counts); return { color: ["#2467e8"], grid: { left: 20, right: 28, top: 12, bottom: 10, containLabel: true }, tooltip: { trigger: "axis", axisPointer: { type: "shadow" } }, xAxis: { type: "value", minInterval: 1 }, yAxis: { type: "category", data: labels, axisLabel: { width: 150, overflow: "truncate" } }, series: [{ type: "bar", data: labels.map((label) => counts[label] || 0), barMaxWidth: 18, itemStyle: { borderRadius: [0, 4, 4, 0] }, label: { show: true, position: "right" } }] }; }
-function isAnswerPresent(value: unknown) { return Array.isArray(value) ? value.length > 0 : typeof value === "string" ? value.trim() !== "" : value !== undefined && value !== null; }
-function isSurveyComplete(survey: WrappedSurvey, answers: Record<string, unknown>) { return survey.questions.every((question) => !question.required || isAnswerPresent(answers[question.question_id])); }
 function Empty({ text }: { text: string }) { return <div className="empty">{text}</div>; }
 function getShareTokenFromLocation() {
   const pathMatch = window.location.pathname.match(/^\/share\/([^/?#]+)/);
   if (pathMatch) return decodeURIComponent(pathMatch[1]);
   return new URLSearchParams(window.location.search).get("share");
+}
+function getAdminUserPortalFromLocation() {
+  return /^\/portal\/?$/.test(window.location.pathname);
 }
 function buildShareUrl(shareToken: string) {
   return `${window.location.origin}/share/${encodeURIComponent(shareToken)}`;
@@ -532,11 +755,6 @@ async function copyText(value: string) {
   document.execCommand("copy");
   document.body.removeChild(input);
 }
-async function postJson<T>(url: string, body: unknown): Promise<T> { const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(await readError(response)); return response.json(); }
-async function adminPostJson<T>(url: string, body: unknown, token: string): Promise<T> { const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Token": token }, body: JSON.stringify(body) }); if (!response.ok) throw new Error(await readError(response)); return response.json(); }
-async function adminDeleteJson<T = { message?: string }>(url: string, token: string): Promise<T> { const response = await fetch(url, { method: "DELETE", headers: { "X-Admin-Token": token } }); if (!response.ok) throw new Error(await readError(response)); return response.json(); }
-async function fetchJson<T>(url: string): Promise<T> { const response = await fetch(url); if (!response.ok) throw new Error(await readError(response)); return response.json(); }
-async function adminFetchJson<T>(url: string, token: string): Promise<T> { const response = await fetch(url, { headers: { "X-Admin-Token": token } }); if (!response.ok) throw new Error(await readError(response)); return response.json(); }
 async function readError(response: Response) { try { const data = (await response.json()) as { detail?: string }; return data.detail || "请求失败"; } catch { return `请求失败（HTTP ${response.status}）`; } }
 async function downloadReport(url: string, token: string, fileName: string) { const response = await fetch(url, { headers: { "X-Admin-Token": token } }); if (!response.ok) throw new Error(await readError(response)); const blob = await response.blob(); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = fileName; link.click(); URL.revokeObjectURL(link.href); }
 function getErrorMessage(error: unknown) { return error instanceof Error ? error.message : "发生未知错误"; }

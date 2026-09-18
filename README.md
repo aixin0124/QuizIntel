@@ -12,7 +12,7 @@
 │   ├── models.py               # 数据模型
 │   ├── requirements.txt        # 后端依赖
 │   ├── services/               # 问卷、AI、统计业务
-│   ├── storage/                # SQLite 数据库
+│   ├── storage/                # MySQL/SQLite 存储、初始化和迁移脚本
 │   ├── utils/                  # Excel、PDF 导出
 │   └── tests/                  # 后端测试
 ├── frontend/
@@ -163,14 +163,39 @@ npm ci
 
 ## 答辩操作流程
 
-1. 启动项目并打开用户端。
-2. 点击“管理后台”，使用 `.env` 中的 `ADMIN_PASSWORD` 登录，默认值为 `10124`。
+1. 启动项目并打开管理后台。
+2. 打开首页即进入管理后台登录，默认管理员账号为 `admin`，初始密码为 `10124`。
 3. 进入“创建包装”，点击“选择推荐问卷模板”，在浮空窗口中选择真实问卷模板并导入；也可以粘贴问卷星公开链接。
 4. 确认解析出的题目，可按需要微调题目、选项和题型。
 5. 填写调研目标和互动主题，点击“生成互动包装”。
-6. 后端调用真实大模型 API 生成包装内容。
-7. 切换到用户端完成答题。
-8. 回到管理后台查看题目映射、统计结果，并导出 Excel 或 PDF。
+6. 后端调用真实大模型 API 生成包装草稿，管理员先预览题目映射和分享链接。
+7. 确认无误后点击发布，问卷进入“收集中”，用户只能通过 `/share/{token}` 分享链接填写。
+8. 顶部“用户端”入口会按原用户端样式列出所有已发布问卷，管理员可以浏览和测试；后台浏览答卷默认计入统计，只有明确测试或管理员标记无效的答卷不计入。
+9. 回到管理后台查看题目映射、统计结果，并导出 Excel 或 PDF。
+
+## MySQL 初始化与旧数据迁移
+
+本项目现在默认使用本机 MySQL 8：
+
+```text
+DATABASE_URL=mysql+pymysql://root:10124@127.0.0.1:3306/fun_research?charset=utf8mb4
+```
+
+初始化数据库：
+
+```bat
+cd /d "D:\desktop\毕业\趣测智研"
+mysql -uroot -p10124 --default-character-set=utf8mb4 < backend\storage\init_mysql.sql
+```
+
+安装新依赖后迁移旧 SQLite 数据：
+
+```bat
+.\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+.\.venv\Scripts\python.exe -m backend.storage.migrate_sqlite_to_mysql --sqlite data\fun_research.db --mysql "mysql+pymysql://root:10124@127.0.0.1:3306/fun_research?charset=utf8mb4"
+```
+
+表结构说明见 `backend/storage/SCHEMA.md`。迁移脚本会直接把 SQLite 历史问卷和答卷插入 MySQL，不把业务数据写入初始化 SQL。
 
 ## 可行性验证
 
@@ -201,7 +226,10 @@ Invoke-WebRequest http://127.0.0.1:8000/api/health
 - 调用 OpenAI 兼容大模型生成互动包装
 - 通过 `question_id` 保留原始题目和互动题面的映射
 - 在线答题并生成趣味结果
-- SQLite 保存包装方案和匿名答卷
+- MySQL 保存包装方案、匿名答卷、管理员账号、操作日志和 AI 生成记录
+- 生成后先保存草稿，管理员预览确认后再发布
+- 通过分享链接访问公开答题页，普通用户不能获取问卷列表
+- 管理员后台内置“用户端”浏览页，可查看所有已发布问卷并进行测试
 - 查看结果分布、研究选项分布和答卷数量
 - 导出 Excel 明细和 PDF 调研报告
 
