@@ -1357,6 +1357,11 @@ small {
   margin-top: 24px;
 }
 
+.user-layout.shared-layout {
+  grid-template-columns: minmax(0, 880px);
+  justify-content: center;
+}
+
 .survey-list {
   align-self: start;
   padding: 20px;
@@ -1783,6 +1788,95 @@ small {
   border-radius: 8px;
   background: #ffffff;
   padding: 16px 18px;
+}
+
+.share-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 186px;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  border: 1px solid #dfe5ec;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 18px;
+}
+
+.share-main {
+  min-width: 0;
+}
+
+.share-main .section-heading {
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.share-main .section-heading h2 {
+  font-size: 20px;
+}
+
+.share-main .section-heading p:last-child {
+  margin: 6px 0 0;
+  color: #667382;
+  font-size: 12px;
+}
+
+.share-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 9px;
+  align-items: center;
+}
+
+.share-link-row input {
+  min-width: 0;
+  color: #526277;
+  font-size: 13px;
+}
+
+.share-link-row button,
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 43px;
+  white-space: nowrap;
+}
+
+.link-button {
+  border: 1px solid #d7dee7;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #2467e8;
+  padding: 10px 14px;
+  text-decoration: none;
+}
+
+.link-button:hover {
+  border-color: #2467e8;
+}
+
+.qr-box {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border: 1px solid #e0e6ee;
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 12px;
+}
+
+.qr-box img {
+  width: 154px;
+  height: 154px;
+  display: block;
+}
+
+.qr-box span {
+  color: #788594;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .survey-control strong {
@@ -2258,6 +2352,7 @@ small {
 
   .hero,
   .user-layout,
+  .share-panel,
   .admin-shell,
   .workspace.two,
   .dashboard-grid,
@@ -2271,6 +2366,7 @@ small {
   }
 
   .survey-control,
+  .share-link-row,
   .analysis-summary-title,
   .trash-item {
     align-items: flex-start;
@@ -2280,6 +2376,15 @@ small {
   .survey-control button {
     width: 100%;
     justify-content: center;
+  }
+
+  .share-link-row {
+    grid-template-columns: 1fr;
+  }
+
+  .share-link-row button,
+  .link-button {
+    width: 100%;
   }
 
   .trash-item-actions {

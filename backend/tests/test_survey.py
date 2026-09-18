@@ -698,6 +698,26 @@ def test_database_survey_status_changes_to_ended(tmp_path) -> None:
     assert database.list_surveys(status="ended")[0]["id"] == survey_id
 
 
+def test_database_creates_and_reads_share_token(tmp_path) -> None:
+    database = ResearchDatabase(str(tmp_path / "survey.sqlite"))
+    survey = build_wrapped_survey(
+        [SurveyQuestion("q1", "价格", options=["100", "200"])],
+        "大学生消费情况调查",
+        "消费偏好",
+        llm_service=FakeLLMService(),
+    )
+    survey_id = database.save_survey(survey)
+
+    saved = database.get_survey(survey_id)
+    share_token = saved["share_token"]
+    shared = database.get_survey_by_share_token(share_token)
+
+    assert share_token
+    assert database.list_surveys()[0]["share_token"] == share_token
+    assert shared is not None
+    assert shared["id"] == survey_id
+
+
 def test_database_updates_survey_title_in_summary_and_payload(tmp_path) -> None:
     database = ResearchDatabase(str(tmp_path / "survey.sqlite"))
     survey = build_wrapped_survey(

@@ -241,7 +241,12 @@ def wrap_survey(
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"大模型调用失败：{exc}") from exc
     survey_id = database.save_survey(survey)
-    return {"id": survey_id, "survey": survey.to_dict()}
+    saved = database.get_survey(survey_id)
+    return {
+        "id": survey_id,
+        "share_token": saved["share_token"] if saved else None,
+        "survey": survey.to_dict(),
+    }
 
 
 @app.get("/api/public/surveys")
@@ -254,6 +259,20 @@ def list_public_surveys() -> dict[str, Any]:
 @app.get("/api/public/surveys/{survey_id}")
 def get_public_survey(survey_id: int) -> dict[str, Any]:
     row = database.get_survey(survey_id)
+    return _public_survey_response(row)
+
+
+@app.get("/api/public/share/{share_token}")
+def get_shared_survey(share_token: str) -> dict[str, Any]:
+    """通过分享链接读取单份问卷，用户端不会拿到问卷列表。"""
+
+    row = database.get_survey_by_share_token(share_token)
+    return _public_survey_response(row)
+
+
+def _public_survey_response(row: dict[str, Any] | None) -> dict[str, Any]:
+    """输出答题端可见字段，剥离调研映射和评分细节。"""
+
     if not row:
         raise HTTPException(status_code=404, detail="问卷不存在。")
     if row["deleted_at"]:
@@ -269,7 +288,7 @@ def get_public_survey(survey_id: int) -> dict[str, Any]:
         question.pop("option_scores", None)
         question.pop("dimension_weights", None)
         question.pop("rationale", None)
-    return {"id": row["id"], "survey": payload}
+    return {"id": row["id"], "share_token": row.get("share_token"), "survey": payload}
 
 
 @app.get("/api/surveys")

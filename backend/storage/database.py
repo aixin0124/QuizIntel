@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +40,8 @@ class ResearchDatabase:
                     status TEXT NOT NULL DEFAULT 'open',
                     ended_at TEXT,
                     analysis_payload TEXT,
-                    deleted_at TEXT
+                    deleted_at TEXT,
+                    share_token TEXT
                 );
                 CREATE TABLE IF NOT EXISTS responses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,19 +76,29 @@ class ResearchDatabase:
                 connection.execute(
                     "ALTER TABLE wrapped_surveys ADD COLUMN deleted_at TEXT"
                 )
+            if "share_token" not in columns:
+                connection.execute(
+                    "ALTER TABLE wrapped_surveys ADD COLUMN share_token TEXT"
+                )
+            self._backfill_share_tokens(connection)
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_wrapped_surveys_share_token "
+                "ON wrapped_surveys(share_token)"
+            )
 
     def save_survey(self, survey: WrappedSurvey) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 "INSERT INTO wrapped_surveys "
-                "(survey_name, theme, source, created_at, payload, status) "
-                "VALUES (?, ?, ?, ?, ?, 'open')",
+                "(survey_name, theme, source, created_at, payload, status, share_token) "
+                "VALUES (?, ?, ?, ?, ?, 'open', ?)",
                 (
                     survey.survey_name,
                     survey.theme,
                     survey.source,
                     datetime.now().isoformat(timespec="seconds"),
                     json.dumps(survey.to_dict(), ensure_ascii=False),
+                    self._new_share_token(connection),
                 ),
             )
             return int(cursor.lastrowid)
@@ -146,7 +158,7 @@ class ResearchDatabase:
             values.append(limit)
             rows = connection.execute(
                 "SELECT s.id, s.survey_name, s.theme, s.source, s.created_at, "
-                "s.status, s.ended_at, s.deleted_at, "
+                "s.status, s.ended_at, s.deleted_at, s.share_token, "
                 "(SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.id) AS response_count "
                 f"FROM wrapped_surveys s {where} ORDER BY s.id DESC LIMIT ?",
                 tuple(values),
@@ -170,6 +182,49 @@ class ResearchDatabase:
             else None
         )
         return item
+
+    def get_survey_by_share_token(self, share_token: str) -> dict[str, Any] | None:
+        """根据分享令牌读取问卷，供公开分享页使用。"""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM wrapped_surveys WHERE share_token = ?",
+                (share_token,),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["payload"] = json.loads(item["payload"])
+        item["analysis"] = (
+            json.loads(item["analysis_payload"])
+            if item.get("analysis_payload")
+            else None
+        )
+        return item
+
+    def _backfill_share_tokens(self, connection: sqlite3.Connection) -> None:
+        """给历史问卷补齐分享令牌，保证旧数据也能直接生成分享链接。"""
+
+        rows = connection.execute(
+            "SELECT id FROM wrapped_surveys WHERE share_token IS NULL OR share_token = ''"
+        ).fetchall()
+        for row in rows:
+            connection.execute(
+                "UPDATE wrapped_surveys SET share_token = ? WHERE id = ?",
+                (self._new_share_token(connection), row["id"]),
+            )
+
+    def _new_share_token(self, connection: sqlite3.Connection) -> str:
+        """生成短而难猜的分享令牌。"""
+
+        while True:
+            token = secrets.token_urlsafe(12)
+            exists = connection.execute(
+                "SELECT 1 FROM wrapped_surveys WHERE share_token = ?",
+                (token,),
+            ).fetchone()
+            if not exists:
+                return token
 
     def finish_survey(self, survey_id: int, analysis: dict[str, Any]) -> dict[str, Any] | None:
         """保存最终分析并将问卷状态切换为已结束。"""
