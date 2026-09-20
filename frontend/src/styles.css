@@ -921,6 +921,31 @@ small {
   border-top: 4px solid #2467e8;
 }
 
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.result-actions button {
+  box-shadow: 0 5px 14px rgba(36, 103, 232, 0.08);
+}
+
+.result-actions + .result {
+  margin-top: 12px;
+}
+
+.result-export-error {
+  margin-top: 10px;
+  border: 1px solid #f0caca;
+  border-radius: 7px;
+  background: #fff6f6;
+  color: #a14343;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .result-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 150px;
@@ -3219,5 +3244,10 @@ small {
 
   .result-hero h3 {
     font-size: 28px;
+  }
+
+  .result-actions button {
+    width: 100%;
+    justify-content: center;
   }
 }

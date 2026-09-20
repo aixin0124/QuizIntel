@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as echarts from "echarts";
-import { BarChart3, BookOpen, CheckCircle2, Copy, Database, ExternalLink, FileDown, FileSpreadsheet, FileText, KeyRound, LayoutDashboard, Link2, LoaderCircle, LockKeyhole, LogOut, Plus, QrCode, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
+import html2canvas from "html2canvas";
+import { BarChart3, BookOpen, CheckCircle2, Copy, Database, Download, ExternalLink, FileDown, FileSpreadsheet, FileText, KeyRound, LayoutDashboard, Link2, LoaderCircle, LockKeyhole, LogOut, Plus, QrCode, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
 import { adminDeleteJson, adminFetchJson, adminPostJson, postJson } from "./api/client";
 import { AnalyticsExtras } from "./components/AnalyticsExtras";
 import { ChartCard as SharedChartCard } from "./components/Charts";
@@ -84,6 +85,9 @@ function App() {
 }
 
 function ResultPanel({ result }: { result: ResultPayload }) {
+  const resultRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const analysis = result.analysis;
   const strengths = analysis?.strengths?.length ? analysis.strengths : result.strengths || [];
   const watchouts = analysis?.watchouts?.length ? analysis.watchouts : result.watchouts || [];
@@ -93,7 +97,45 @@ function ResultPanel({ result }: { result: ResultPayload }) {
   const summary = buildPersonalitySummary(analysis?.summary || result.description, result, dimensions, personalityReference);
   const highlightDimensions = dimensions.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 3);
   const matchIndex = getResultMatchIndex(dimensions);
-  return <div className="result result-report"><div className="result-hero"><div><p className="result-kicker">YOUR RESULT</p><h3>你是{result.name}</h3><p>{getHeroSummary(summary)}</p>{highlightDimensions.length > 0 && <div className="result-tags">{highlightDimensions.map((item) => <span key={item.key}>{item.name} · {item.signal}</span>)}</div>}</div><div className="result-score"><span>匹配指数</span><b>{matchIndex}</b><em>/ 100</em></div></div>{dimensions.length > 0 && <section className="result-section"><div className="result-section-title"><strong>维度画像</strong><span>根据你的选择换算出的倾向强弱</span></div><div className="result-dimension-overview"><ResultRadarChart dimensions={dimensions} /><div className="dimension-grid">{dimensions.map((item) => { const percent = dimensionPercent(item.score); return <article className="dimension-card" key={item.key}><div className="dimension-card-head"><span>{item.name}</span><b>{item.signal}</b></div><div className="dimension-scale"><span style={{ width: `${percent}%` }} /></div><div className="dimension-card-foot"><small>{item.description}</small><em>{percent}%</em></div></article>; })}</div></div></section>}<section className="personality-section"><div className="personality-reference"><span>人格参考</span><strong>你是{personalityReference}</strong></div><div className="personality-analysis"><span>人格解析</span><p>{summary}</p></div></section><section className="result-insights"><InsightCard title="你的突出特质" items={strengths} fallback="你的选择呈现出比较清晰的个人偏好。" /><InsightCard title="可以留意" items={watchouts} fallback="当结果落在中间区间时，可以结合真实场景继续观察。" /><div className="insight-card advice-card"><strong>带走一条建议</strong><p>{advice}</p></div></section></div>;
+  async function exportResultImage() {
+    if (!resultRef.current || exporting) return;
+    setExporting(true);
+    setExportError("");
+    try {
+      if (document.fonts?.ready) {
+        await document.fonts.ready;
+      }
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      const canvas = await html2canvas(resultRef.current, {
+        backgroundColor: "#ffffff",
+        logging: false,
+        scale: Math.min(window.devicePixelRatio || 1, 2),
+        useCORS: true,
+      });
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((value) => {
+          if (value) {
+            resolve(value);
+          } else {
+            reject(new Error("图片生成失败"));
+          }
+        }, "image/png");
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = buildResultImageFilename(result.name);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch {
+      setExportError("结果图片生成失败，请稍后重试。");
+    } finally {
+      setExporting(false);
+    }
+  }
+  return <div className="result-wrap"><div className="result-actions"><button className="secondary compact-action" onClick={() => void exportResultImage()} disabled={exporting}><Download size={16} /> {exporting ? "正在生成图片..." : "导出结果图片"}</button></div>{exportError && <div className="result-export-error" role="alert">{exportError}</div>}<div className="result result-report" ref={resultRef}><div className="result-hero"><div><p className="result-kicker">YOUR RESULT</p><h3>你是{result.name}</h3><p>{getHeroSummary(summary)}</p>{highlightDimensions.length > 0 && <div className="result-tags">{highlightDimensions.map((item) => <span key={item.key}>{item.name} · {item.signal}</span>)}</div>}</div><div className="result-score"><span>匹配指数</span><b>{matchIndex}</b><em>/ 100</em></div></div>{dimensions.length > 0 && <section className="result-section"><div className="result-section-title"><strong>维度画像</strong><span>根据你的选择换算出的倾向强弱</span></div><div className="result-dimension-overview"><ResultRadarChart dimensions={dimensions} /><div className="dimension-grid">{dimensions.map((item) => { const percent = dimensionPercent(item.score); return <article className="dimension-card" key={item.key}><div className="dimension-card-head"><span>{item.name}</span><b>{item.signal}</b></div><div className="dimension-scale"><span style={{ width: `${percent}%` }} /></div><div className="dimension-card-foot"><small>{item.description}</small><em>{percent}%</em></div></article>; })}</div></div></section>}<section className="personality-section"><div className="personality-reference"><span>人格参考</span><strong>你是{personalityReference}</strong></div><div className="personality-analysis"><span>人格解析</span><p>{summary}</p></div></section><section className="result-insights"><InsightCard title="你的突出特质" items={strengths} fallback="你的选择呈现出比较清晰的个人偏好。" /><InsightCard title="可以留意" items={watchouts} fallback="当结果落在中间区间时，可以结合真实场景继续观察。" /><div className="insight-card advice-card"><strong>带走一条建议</strong><p>{advice}</p></div></section></div></div>;
 }
 
 function InsightCard({ title, items, fallback }: { title: string; items: string[]; fallback: string }) {
@@ -184,6 +226,11 @@ function getResultMatchIndex(dimensions: DimensionBreakdown[]) {
   if (!dimensions.length) return 88;
   const averageStrength = dimensions.reduce((sum, item) => sum + Math.abs(item.score), 0) / dimensions.length;
   return Math.max(59, Math.min(98, Math.round(72 + averageStrength * 26)));
+}
+
+function buildResultImageFilename(resultName: string) {
+  const safeName = resultName.replace(/[\\/:*?"<>|]/g, "").trim() || "结果";
+  return `人格解析-${safeName}.png`;
 }
 
 function AdminLogin({ onLogin }: { onLogin: (token: string, role: string) => void }) {
