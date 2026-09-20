@@ -72,18 +72,16 @@ LLM_FALLBACK_MODEL=deepseek-v4-flash
 打开两个窗口前，先在 `cmd` 中执行一次下面的环境准备命令：
 
 ```bat
-cd /d "D:\desktop\毕业\趣测智研"
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-cd /d "D:\desktop\毕业\趣测智研\frontend"
+cd /d ".\frontend"
 npm ci
-cd /d "D:\desktop\毕业\趣测智研"
+cd /d "../"
 ```
 
 如果项目根目录还没有 `.env`，先执行：
 
 ```bat
-cd /d "D:\desktop\毕业\趣测智研"
 copy .env.example .env
 notepad .env
 ```
@@ -97,14 +95,13 @@ notepad .env
 窗口一：启动后端，复制下面两行执行：
 
 ```bat
-cd /d "D:\desktop\毕业\趣测智研"
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 窗口二：启动前端，复制下面两行执行：
 
 ```bat
-cd /d "D:\desktop\毕业\趣测智研\frontend"
+cd /d ".\frontend"
 npm run dev -- --host 127.0.0.1
 ```
 
