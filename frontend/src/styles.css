@@ -63,24 +63,41 @@ main {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   border: 0;
   background: transparent;
   font-weight: 900;
+  padding: 0;
+  text-align: left;
+}
+
+.brand-mark {
+  display: block;
+  width: 34px;
+  height: 38px;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.brand-name {
+  color: inherit;
+  font-size: 16px;
   letter-spacing: 0.06em;
-  padding: 3px 0;
+}
+
+.brand-subtitle {
+  margin-left: 0;
+  color: #7b8795;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
 }
 
 .brand:hover:not(:disabled) {
   border-color: transparent;
   color: #2467e8;
-}
-
-.brand span {
-  margin-left: 9px;
-  color: #7b8795;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
 }
 
 .main-nav {
