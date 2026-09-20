@@ -12,7 +12,14 @@ import { ResponseTable } from "./components/ResponseTable";
 import { SecurityPanel } from "./components/SecurityPanel";
 import { WrappedSurveyEditor } from "./components/WrappedSurveyEditor";
 import { AdminPortalLayout } from "./pages/AdminPortal";
+import { ApiServicePage } from "./pages/ApiServicePage";
+import { AuthPage } from "./pages/AuthPage";
+import { LandingPage } from "./pages/LandingPage";
+import { PlatformAuthPage } from "./pages/PlatformAuthPage";
+import { PlatformPortal } from "./pages/PlatformPortal";
+import { TeamPanel } from "./pages/TeamPanel";
 import { UserPortal as UserPortalPage } from "./pages/UserPortal";
+import { canManageTenant } from "./permissions";
 import "./styles.css";
 
 import type {
@@ -73,14 +80,78 @@ const seenHeadlinesStorageKey = "fun_research_seen_headlines";
 const headlineApiUrl = "https://api.zxki.cn/api/jhrs?type=douyin";
 
 function App() {
-  const [adminToken, setAdminToken] = useState(() => sessionStorage.getItem("admin_token") || "");
-  const [adminRole, setAdminRole] = useState(() => sessionStorage.getItem("admin_role") || "admin");
+  const [authToken, setAuthToken] = useState(() => {
+    const legacyRole = sessionStorage.getItem("admin_role");
+    return legacyRole === "platform_admin"
+      ? ""
+      : sessionStorage.getItem("auth_token") || sessionStorage.getItem("admin_token") || "";
+  });
+  const [authRole, setAuthRole] = useState(() => {
+    const legacyRole = sessionStorage.getItem("admin_role");
+    return legacyRole === "platform_admin" ? "owner" : legacyRole || "owner";
+  });
+  const [platformToken, setPlatformToken] = useState(() => {
+    const legacyRole = sessionStorage.getItem("admin_role");
+    return sessionStorage.getItem("platform_token")
+      || (legacyRole === "platform_admin" ? sessionStorage.getItem("auth_token") || sessionStorage.getItem("admin_token") || "" : "");
+  });
   const shareToken = getShareTokenFromLocation();
+  const pathname = window.location.pathname;
   const isUserPortal = getAdminUserPortalFromLocation();
-  function logout() { sessionStorage.removeItem("admin_token"); sessionStorage.removeItem("admin_role"); setAdminToken(""); setAdminRole("admin"); }
-  return <main>
-    <header className="topbar"><button className="brand" onClick={() => window.location.assign("/portal")} aria-label="返回用户端"><img className="brand-mark" src="/brand-icon.png" alt="" /><span className="brand-name">趣测智研</span><span className="brand-subtitle">FUN RESEARCH</span></button>{!shareToken && <nav className="main-nav">{adminToken && <button className={isUserPortal ? "active" : ""} onClick={() => window.location.assign("/portal")}><Users size={16} /> 用户端</button>}<button className={!isUserPortal ? "active" : ""} onClick={() => window.location.assign("/")}><LayoutDashboard size={16} /> 管理后台</button>{adminToken && <button className="icon-button" onClick={logout} title="退出管理后台" aria-label="退出管理后台"><LogOut size={17} /></button>}</nav>}</header>
-    {shareToken ? <UserPortalPage shareToken={shareToken} renderResult={(result) => <ResultPanel result={result} />} /> : isUserPortal ? (adminToken ? <UserPortalPage adminBrowse token={adminToken} renderResult={(result) => <ResultPanel result={result} />} /> : <AdminLogin onLogin={(token, role) => { setAdminToken(token); setAdminRole(role); }} />) : adminToken ? <AdminPortal token={adminToken} role={adminRole} onLogout={logout} /> : <AdminLogin onLogin={(token, role) => { setAdminToken(token); setAdminRole(role); }} />}
+  const isHome = pathname === "/" || pathname === "/home";
+  const isAuthPage = pathname === "/login" || pathname === "/register";
+  const isPlatformLogin = pathname === "/platform/login" || pathname === "/platform-login";
+  const isConsole = pathname === "/console" || pathname.startsWith("/console/");
+  const isApiService = pathname === "/api-service" || pathname.startsWith("/api-service/");
+  const isPlatform = pathname === "/platform" || pathname.startsWith("/platform/");
+  function logout() { sessionStorage.removeItem("auth_token"); sessionStorage.removeItem("admin_token"); sessionStorage.removeItem("admin_role"); setAuthToken(""); setAuthRole("owner"); }
+  function logoutPlatform() { sessionStorage.removeItem("platform_token"); sessionStorage.removeItem("platform_role"); sessionStorage.removeItem("auth_token"); sessionStorage.removeItem("admin_token"); sessionStorage.removeItem("admin_role"); setPlatformToken(""); setAuthToken(""); }
+  function handleAuthenticated(data: { token: string; role?: string }) {
+    const role = data.role || "owner";
+    sessionStorage.setItem("auth_token", data.token);
+    sessionStorage.setItem("admin_token", data.token);
+    sessionStorage.setItem("admin_role", role);
+    setAuthToken(data.token);
+    setAuthRole(role);
+    window.location.assign("/console");
+  }
+  function handlePlatformAuthenticated(data: { token: string; role?: string }) {
+    sessionStorage.setItem("platform_token", data.token);
+    sessionStorage.setItem("platform_role", data.role || "platform_admin");
+    setPlatformToken(data.token);
+    window.location.assign("/platform");
+  }
+  const consoleNav = authToken && !shareToken && !isPlatform && <nav className="main-nav">
+    <button onClick={() => window.location.assign("/#product")}>产品</button>
+    <button onClick={() => window.location.assign("/#workflow")}>解决方案</button>
+    <button className={isApiService ? "active" : ""} onClick={() => window.location.assign("/api-service")}><KeyRound size={16} /> API 服务</button>
+    <button className={isConsole ? "active" : ""} onClick={() => window.location.assign("/console")}><LayoutDashboard size={16} /> 控制台</button>
+    <button className={isUserPortal ? "active" : ""} onClick={() => window.location.assign("/portal")}><Users size={16} /> 用户端</button>
+    <button className="icon-button" onClick={logout} title="退出登录" aria-label="退出登录"><LogOut size={17} /></button>
+  </nav>;
+  const platformNav = platformToken && isPlatform && <nav className="main-nav landing-nav">
+    <button className="active" onClick={() => window.location.assign("/platform")}><ShieldCheck size={16} /> 平台后台</button>
+    <button className="icon-button" onClick={logoutPlatform} title="退出平台后台" aria-label="退出平台后台"><LogOut size={17} /></button>
+  </nav>;
+  const publicNav = !authToken && !platformToken && !shareToken && <nav className="main-nav landing-nav">
+    <button onClick={() => window.location.assign("/#product")}>产品</button>
+    <button onClick={() => window.location.assign("/#workflow")}>解决方案</button>
+    <button onClick={() => window.location.assign("/api-service")}>API 服务</button>
+    <button onClick={() => window.location.assign("/platform/login")}>平台管理</button>
+    <button onClick={() => window.location.assign("/login")}>登录</button>
+    <button className="primary register-nav-button" onClick={() => window.location.assign("/register")}>注册</button>
+  </nav>;
+  return <main className={`app-main ${isHome ? "marketing-main" : ""}`}>
+    <header className="topbar"><button className="brand" onClick={() => window.location.assign("/")} aria-label="返回趣测智研首页"><img className="brand-mark" src="/brand-icon.png" alt="" /><span className="brand-name">趣测智研</span><span className="brand-subtitle">FUN RESEARCH</span></button>{platformNav || consoleNav || publicNav}</header>
+    {shareToken ? <UserPortalPage shareToken={shareToken} renderResult={(result) => <ResultPanel result={result} />} /> :
+      isHome ? <LandingPage authenticated={Boolean(authToken)} /> :
+      isPlatformLogin ? <PlatformAuthPage onAuthenticated={handlePlatformAuthenticated} /> :
+      isAuthPage ? <AuthPage mode={pathname === "/register" ? "register" : "login"} onAuthenticated={handleAuthenticated} /> :
+      isApiService ? (authToken ? <ApiServicePage token={authToken} /> : <AuthPage mode="login" onAuthenticated={handleAuthenticated} />) :
+      isPlatform ? (platformToken ? <PlatformPortal token={platformToken} /> : <PlatformAuthPage onAuthenticated={handlePlatformAuthenticated} />) :
+      isUserPortal ? (authToken ? <UserPortalPage adminBrowse token={authToken} renderResult={(result) => <ResultPanel result={result} />} /> : <AuthPage mode="login" onAuthenticated={handleAuthenticated} />) :
+      isConsole ? (authToken ? <AdminPortal token={authToken} role={authRole} onLogout={logout} /> : <AuthPage mode="login" onAuthenticated={handleAuthenticated} />) :
+      <LandingPage authenticated={Boolean(authToken)} />}
   </main>;
 }
 
@@ -234,14 +305,14 @@ function buildResultImageFilename(resultName: string) {
 }
 
 function AdminLogin({ onLogin }: { onLogin: (token: string, role: string) => void }) {
-  const [username, setUsername] = useState("admin"); const [password, setPassword] = useState(""); const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false);
+  const [username, setUsername] = useState("aixin"); const [password, setPassword] = useState(""); const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false);
   async function login(event: React.FormEvent) { event.preventDefault(); setLoading(true); setMessage(""); try { const data = await postJson<{ token: string; role?: string }>("/api/admin/login", { username, password }); const role = data.role || "admin"; sessionStorage.setItem("admin_token", data.token); sessionStorage.setItem("admin_role", role); onLogin(data.token, role); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
-  return <section className="login-wrap"><form className="login-panel" onSubmit={login}><div className="login-icon"><ShieldCheck size={25} /></div><p className="eyebrow">RESEARCH CONSOLE</p><h1>管理后台</h1><p>登录后管理问卷包装、查看题目映射和分析答卷数据。</p><label htmlFor="admin-username">管理员账号</label><div className="password-input"><Users size={17} /><input id="admin-username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="admin" autoFocus /></div><label htmlFor="admin-password">登录密码</label><div className="password-input"><KeyRound size={17} /><input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" /></div>{message && <div className="form-error">{message}</div>}<button className="primary wide" type="submit" disabled={loading || !username.trim() || !password}>{loading ? "登录中..." : "进入管理后台"}</button></form></section>;
+  return <section className="login-wrap"><form className="login-panel" onSubmit={login}><div className="login-icon"><ShieldCheck size={25} /></div><p className="eyebrow">RESEARCH CONSOLE</p><h1>管理后台</h1><p>登录后管理问卷包装、查看题目映射和分析答卷数据。</p><label htmlFor="admin-username">管理员账号</label><div className="password-input"><Users size={17} /><input id="admin-username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="aixin" autoFocus /></div><label htmlFor="admin-password">登录密码</label><div className="password-input"><KeyRound size={17} /><input id="admin-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="请输入密码" /></div>{message && <div className="form-error">{message}</div>}<button className="primary wide" type="submit" disabled={loading || !username.trim() || !password}>{loading ? "登录中..." : "进入管理后台"}</button></form></section>;
 }
 
 function AdminPortal({ token, role, onLogout }: { token: string; role: string; onLogout: () => void }) {
-  const canManage = role === "admin";
-  const [active, setActive] = useState<"overview" | "create" | "mapping" | "editor" | "responses" | "analysis" | "security" | "trash">("overview");
+  const canManage = canManageTenant(role);
+  const [active, setActive] = useState<"overview" | "create" | "mapping" | "editor" | "responses" | "analysis" | "security" | "trash" | "teams">("overview");
   const [surveys, setSurveys] = useState<SurveySummary[]>([]);
   const [trashItems, setTrashItems] = useState<SurveySummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -410,7 +481,7 @@ function AdminPortal({ token, role, onLogout }: { token: string; role: string; o
     setActive("editor");
   }
 
-  return <AdminPortalLayout role={role}><aside className="admin-sidebar">
+  return <AdminPortalLayout role={role} token={token}><aside className="admin-sidebar">
     <button className={active === "overview" ? "active" : ""} onClick={() => setActive("overview")}><LayoutDashboard size={17} /> 数据总览</button>
     <button className={active === "create" ? "active" : ""} onClick={() => setActive("create")} disabled={!canManage}><Plus size={17} /> 创建包装</button>
     <button className={active === "editor" ? "active" : ""} onClick={() => setActive("editor")} disabled={!survey || !selectedId}><Save size={17} /> 互动题面</button>
@@ -418,6 +489,7 @@ function AdminPortal({ token, role, onLogout }: { token: string; role: string; o
     <button className={active === "responses" ? "active" : ""} onClick={() => setActive("responses")} disabled={!survey}><Users size={17} /> 答卷明细</button>
     <button className={active === "analysis" ? "active" : ""} onClick={() => setActive("analysis")} disabled={!survey}><FileText size={17} /> 问卷数据分析</button>
     <button className={active === "security" ? "active" : ""} onClick={() => setActive("security")}><ShieldCheck size={17} /> 账号与安全</button>
+    <button className={active === "teams" ? "active" : ""} onClick={() => setActive("teams")}><Users size={17} /> 协作成员</button>
     <button className={active === "trash" ? "active" : ""} onClick={() => { setActive("trash"); void loadTrash(); }}><Trash2 size={17} /> 回收站 <span className="trash-count">{trashItems.length}</span></button>
     <div className="sidebar-divider" /><p>已保存问卷</p>
     {!surveys.length ? <span className="sidebar-empty">暂无已保存问卷</span> : surveys.map((item) => <button className={`sidebar-survey ${selectedId === item.id ? "selected" : ""}`} key={item.id} onClick={(event) => { const target = event.target as HTMLElement; if (target.closest("[data-delete-survey]")) { event.stopPropagation(); void moveToTrash(item); return; } void selectSurvey(item.id); }}>
@@ -433,6 +505,7 @@ function AdminPortal({ token, role, onLogout }: { token: string; role: string; o
       active === "responses" ? <ResponseTable rows={responseRows} token={token} role={role} onChanged={(rows) => { setResponseRows(rows); if (selectedId) void selectSurvey(selectedId); }} /> :
       active === "analysis" && survey ? <AnalysisView survey={survey} summary={summary} analysis={analysis} status={surveyStatus} token={token} selectedId={selectedId} role={role} onArchived={handlePublicationSaved} /> :
       active === "security" ? <SecurityPanel token={token} role={role} /> :
+      active === "teams" ? <TeamPanel token={token} /> :
       active === "trash" ? <TrashView items={trashItems} loading={trashLoading} onRestore={restoreFromTrash} onPermanentDelete={permanentlyDelete} /> :
       <Dashboard
         survey={survey}
@@ -476,10 +549,11 @@ function statusLabel(status: SurveyStatus) {
 
 function CreateWorkspace({ token, onCreated }: { token: string; onCreated: (id: number, survey: WrappedSurvey, shareToken?: string | null) => void }) {
   const [wjxUrl, setWjxUrl] = useState(""); const [questions, setQuestions] = useState<SurveyQuestion[]>([]); const [brandGoal, setBrandGoal] = useState(""); const [themeHint, setThemeHint] = useState("你的隐藏行动风格"); const [message, setMessage] = useState(""); const [loading, setLoading] = useState(false); const [generating, setGenerating] = useState(false); const [templateDialogOpen, setTemplateDialogOpen] = useState(false); const [selectedTemplate, setSelectedTemplate] = useState<SurveyTemplate>(recommendedSurveyTemplates[0]);
+  const estimatedTokens = Math.max(1, Math.floor(JSON.stringify({ brandGoal, themeHint, questions }, null, 0).length / 2));
   async function parseWjx() { const importUrl = normalizeImportUrl(wjxUrl); setLoading(true); setMessage(""); try { const data = await adminPostJson<ImportSurveyResponse>("/api/surveys/parse-wjx", { url: importUrl }, token); setQuestions(data.questions); setBrandGoal(buildDefaultBrandGoal(data.title)); setWjxUrl(data.source_url || importUrl); setMessage(`已导入“${data.title}”，识别 ${data.questions.length} 道题，并已将问卷标题写入调研目标。`); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
   async function importTemplate(template: SurveyTemplate) { setLoading(true); setMessage(""); try { const data = await adminPostJson<ImportSurveyResponse>("/api/surveys/import-template", { url: template.sourceUrl }, token); setQuestions(data.questions); setBrandGoal(`${template.goal}。来源问卷：${data.title}`); setThemeHint(template.themeHint); setWjxUrl(data.source_url || template.sourceUrl); setTemplateDialogOpen(false); setMessage(`已从推荐模板“${template.title}”抓取真实问卷“${data.title}”，识别 ${data.questions.length} 道题。`); } catch (error) { setMessage(getErrorMessage(error)); } finally { setLoading(false); } }
-  async function wrapSurvey() { setLoading(true); setGenerating(true); setMessage(""); try { const data = await adminPostJson<{ id: number; share_token?: string | null; survey: WrappedSurvey }>("/api/surveys/wrap", { questions, brand_goal: brandGoal, theme_hint: themeHint }, token); onCreated(data.id, data.survey, data.share_token); } catch (error) { setMessage(getErrorMessage(error)); } finally { setGenerating(false); setLoading(false); } }
-  return <section><GenerationOverlay visible={generating} /><TemplatePickerModal visible={templateDialogOpen} selected={selectedTemplate} loading={loading} onClose={() => setTemplateDialogOpen(false)} onSelect={setSelectedTemplate} onImport={importTemplate} /><div className="page-title"><div><p className="eyebrow">CREATE A STUDY</p><h2>创建互动包装</h2><p>从真实问卷模板开始，让 AI 围绕主题重新设计互动题和分析维度。</p></div><Sparkles size={26} /></div>{message && <div className="notice">{message}</div>}<div className="workspace two"><div className="panel import-panel"><div className="section-heading"><div><h2><BookOpen size={19} /> 导入问卷</h2><p>推荐先从公开模板库选择一份真实问卷。</p></div><span className="step-number">01</span></div><button className="template-trigger" onClick={() => setTemplateDialogOpen(true)} disabled={loading}><BookOpen size={18} /><span><strong>选择推荐问卷模板</strong><small>内置 {recommendedSurveyTemplates.length} 份公开模板入口，点击后浮窗预览并导入真实题目。</small></span></button><label htmlFor="wjx-url">公开问卷或模板链接</label><div className="url-input-row"><input id="wjx-url" type="url" value={wjxUrl} onChange={(event) => setWjxUrl(event.target.value)} placeholder="v.wjx.cn/vm/xxxxx.aspx 或 wenjuan.com/lib_detail_full/..." /><button className="primary import-action" onClick={() => void parseWjx()} disabled={loading || !wjxUrl.trim()}><Link2 size={16} /> 解析链接</button></div><p className="field-hint">支持问卷星公开填写链接和问卷网公开模板详情页；无法解析需要登录、校验或仅小程序可访问的链接。</p></div><div className="panel"><div className="section-heading"><h2><Sparkles size={19} /> AI 包装设定</h2><span className="step-number">02</span></div><label>调研目标</label><textarea className="short" value={brandGoal} onChange={(event) => setBrandGoal(event.target.value)} placeholder="选择模板或导入公开链接后自动填入，也可以手动补充" /><p className="field-hint">导入问卷后会自动填入来源标题，也可以继续补充调研目标。</p><label>测评主题</label><input value={themeHint} onChange={(event) => setThemeHint(event.target.value)} placeholder="例如：年轻人的口红消费风格、周末旅行决策风格" /><button className="primary" onClick={() => void wrapSurvey()} disabled={!questions.length || !brandGoal.trim() || !themeHint.trim() || loading}>生成互动包装</button></div></div><SharedQuestionEditor questions={questions} onChange={setQuestions} /></section>;
+  async function wrapSurvey() { setLoading(true); setGenerating(true); setMessage(""); try { const data = await adminPostJson<{ id: number; share_token?: string | null; survey: WrappedSurvey }>("/api/surveys/wrap", { questions, brand_goal: brandGoal, theme_hint: themeHint, team_id: null }, token); onCreated(data.id, data.survey, data.share_token); } catch (error) { setMessage(getErrorMessage(error)); } finally { setGenerating(false); setLoading(false); } }
+  return <section><GenerationOverlay visible={generating} /><TemplatePickerModal visible={templateDialogOpen} selected={selectedTemplate} loading={loading} onClose={() => setTemplateDialogOpen(false)} onSelect={setSelectedTemplate} onImport={importTemplate} /><div className="page-title"><div><p className="eyebrow">CREATE A STUDY</p><h2>创建互动包装</h2><p>从真实问卷模板开始，让 AI 围绕主题重新设计互动题和分析维度。</p></div><Sparkles size={26} /></div>{message && <div className="notice">{message}</div>}<div className="workspace two"><div className="panel import-panel"><div className="section-heading"><div><h2><BookOpen size={19} /> 导入问卷</h2><p>推荐先从公开模板库选择一份真实问卷。</p></div><span className="step-number">01</span></div><button className="template-trigger" onClick={() => setTemplateDialogOpen(true)} disabled={loading}><BookOpen size={18} /><span><strong>选择推荐问卷模板</strong><small>内置 {recommendedSurveyTemplates.length} 份公开模板入口，点击后浮窗预览并导入真实题目。</small></span></button><label htmlFor="wjx-url">公开问卷或模板链接</label><div className="url-input-row"><input id="wjx-url" type="url" value={wjxUrl} onChange={(event) => setWjxUrl(event.target.value)} placeholder="v.wjx.cn/vm/xxxxx.aspx 或 wenjuan.com/lib_detail_full/..." /><button className="primary import-action" onClick={() => void parseWjx()} disabled={loading || !wjxUrl.trim()}><Link2 size={16} /> 解析链接</button></div><p className="field-hint">支持问卷星公开填写链接和问卷网公开模板详情页；无法解析需要登录、校验或仅小程序可访问的链接。</p></div><div className="panel"><div className="section-heading"><h2><Sparkles size={19} /> AI 包装设定</h2><span className="step-number">02</span></div><div className="workspace-note"><Users size={17} /><span><strong>个人问卷空间</strong><small>新建问卷默认归你管理，需要协作时再按问卷邀请成员。</small></span></div><label>调研目标</label><textarea className="short" value={brandGoal} onChange={(event) => setBrandGoal(event.target.value)} placeholder="选择模板或导入公开链接后自动填入，也可以继续补充" /><p className="field-hint">导入问卷后会自动填入来源标题，也可以继续补充调研目标。</p><label>测评主题</label><input value={themeHint} onChange={(event) => setThemeHint(event.target.value)} placeholder="例如：年轻人的口红消费风格、周末旅行决策风格" /><div className="token-estimate"><span>本次预计消耗</span><strong>{estimatedTokens.toLocaleString()} Token</strong><small>生成失败会自动返还额度</small></div><button className="primary" onClick={() => void wrapSurvey()} disabled={!questions.length || !brandGoal.trim() || !themeHint.trim() || loading}>生成互动包装</button></div></div><SharedQuestionEditor questions={questions} onChange={setQuestions} /></section>;
 }
 
 function buildDefaultBrandGoal(surveyTitle = "") {
@@ -710,7 +784,7 @@ function Dashboard({ survey, summary, surveyCount, loading, token, selectedId, s
   const collecting = status === "collecting";
   const ended = status === "ended";
   const finalized = ended || status === "archived";
-  const canManage = role === "admin";
+  const canManage = canManageTenant(role);
   const statusTitle = status === "archived" ? "问卷已归档" : ended ? "问卷已结束，等待数据分析" : collecting ? "问卷正在收集答卷" : "问卷仍处于发布前预览阶段";
   const statusDescription = status === "archived"
     ? "问卷已归档并锁定，已生成的分析和题面不能再修改。"

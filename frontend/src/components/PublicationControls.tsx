@@ -2,6 +2,7 @@ import { Archive, CheckCircle2, Play } from "lucide-react";
 import { useState } from "react";
 import { adminPostJson } from "../api/client";
 import type { ResearchAnalysis, SurveyStatus, SurveySummary } from "../types";
+import { canManageTenant } from "../permissions";
 
 type PublicationControlsProps = {
   surveyId: number;
@@ -18,7 +19,7 @@ export function PublicationControls({
   status,
   onSaved,
 }: PublicationControlsProps) {
-  const canManage = role === "admin";
+  const canManage = canManageTenant(role);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 

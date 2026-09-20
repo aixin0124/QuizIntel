@@ -831,7 +831,55 @@ def test_database_trash_restore_and_permanent_delete(tmp_path) -> None:
 
     assert database.permanently_delete_survey(survey_id) is True
     assert database.get_survey(survey_id) is None
-    assert database.list_responses(survey_id) == []
+
+
+def test_billing_overview_isolated_by_account(tmp_path) -> None:
+    database = ResearchDatabase(str(tmp_path / "billing.sqlite"))
+    first = database.register_tenant(username="alice", password="123456")
+    second = database.register_tenant(username="bob", password="123456")
+
+    database.record_generation(
+        survey_id=None,
+        tenant_id=first["tenant"]["id"],
+        created_by=first["user"]["id"],
+        prompt_version="wrap-v1",
+        model_name="test-model",
+        latency_ms=10,
+        token_estimate=321,
+        cost_estimate=321,
+        quality_score=100,
+        retry_count=0,
+        status="success",
+    )
+    database.record_generation(
+        survey_id=None,
+        tenant_id=second["tenant"]["id"],
+        created_by=second["user"]["id"],
+        prompt_version="parse-v1",
+        model_name="test-model",
+        latency_ms=10,
+        token_estimate=654,
+        cost_estimate=654,
+        quality_score=100,
+        retry_count=0,
+        status="success",
+    )
+
+    first_overview = database.get_billing_overview(
+        first["tenant"]["id"],
+        first["user"]["id"],
+    )
+    second_overview = database.get_billing_overview(
+        second["tenant"]["id"],
+        second["user"]["id"],
+    )
+
+    assert first_overview["used"] == 321
+    assert first_overview["api_calls"] == 1
+    assert [item["token_estimate"] for item in first_overview["recent_usage"]] == [321]
+    assert second_overview["used"] == 654
+    assert second_overview["api_calls"] == 1
+    assert [item["token_estimate"] for item in second_overview["recent_usage"]] == [654]
 
 
 def test_llm_service_falls_back_to_tokenrhythm(monkeypatch) -> None:

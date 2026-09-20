@@ -2,6 +2,7 @@ import { Plus, Save, Trash2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { adminPostJson } from "../api/client";
 import type { SurveyStatus, WrappedQuestion, WrappedSurvey } from "../types";
+import { canManageTenant } from "../permissions";
 
 type WrappedSurveyEditorProps = {
   surveyId: number;
@@ -16,7 +17,7 @@ export function WrappedSurveyEditor({ surveyId, survey, token, role, status, onS
   const [draft, setDraft] = useState(survey);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  const canManage = role === "admin";
+  const canManage = canManageTenant(role);
   const canEdit = canManage && status === "draft";
 
   useEffect(() => setDraft(survey), [survey]);

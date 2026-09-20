@@ -51,6 +51,10 @@ export type SurveySummary = {
   model_name?: string | null;
   generation_latency_ms?: number | null;
   quality_score?: number | null;
+  tenant_id?: number | null;
+  team_id?: number | null;
+  team_name?: string | null;
+  moderation_status?: "pending" | "approved" | "rejected" | string;
 };
 
 export type DimensionBreakdown = {
@@ -212,8 +216,150 @@ export type AnalyticsPayload = {
 export type AdminUser = {
   id: number;
   username: string;
-  role: "admin" | "viewer" | string;
+  role: "platform_admin" | "owner" | "tenant_owner" | "survey_admin" | "admin" | "viewer" | "member" | string;
   is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  display_name?: string | null;
+  tenant_id?: number | null;
+};
+
+export type Team = {
+  id: number;
+  tenant_id: number;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  created_by?: number | null;
+  member_role?: "manager" | "editor" | "viewer" | string;
+  member_count?: number;
+  survey_count?: number;
+};
+
+export type TeamMember = {
+  id: number;
+  username: string;
+  display_name?: string | null;
+  email?: string | null;
+  is_active: boolean;
+  member_role: "manager" | "editor" | "viewer" | string;
+  status: string;
+  created_at: string;
+  responded_at?: string | null;
+};
+
+export type TeamInvitation = {
+  id: number;
+  team_id: number;
+  team_name?: string;
+  permission: "viewer" | "editor" | string;
+  status: "pending" | "accepted" | "rejected" | string;
+  created_at: string;
+  responded_at?: string | null;
+  invited_by_username?: string | null;
+  invited_by_name?: string | null;
+  invitee_username?: string | null;
+  invitee_name?: string | null;
+};
+
+export type SurveyPermission = {
+  survey_id: number;
+  user_id: number;
+  permission: "viewer" | "editor" | string;
+  username: string;
+  display_name?: string | null;
+  email?: string | null;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AccountProfile = {
+  id: number;
+  username: string;
+  display_name?: string | null;
+  role: string;
+  tenant_id?: number | null;
+  tenant_name?: string | null;
+  workspace_name?: string | null;
+  token_balance?: number | null;
+  token_used?: number | null;
+};
+
+export type BillingOverview = {
+  tenant_id: number | null;
+  tenant_name: string;
+  balance: number;
+  used: number;
+  today_used: number;
+  api_calls: number;
+  average_latency_ms: number;
+  pending_requests: number;
+  recent_usage: Array<{
+    id: number;
+    survey_id?: number | null;
+    survey_name?: string | null;
+    prompt_version: string;
+    model_name: string;
+    token_estimate: number;
+    status: string;
+    created_at: string;
+  }>;
+};
+
+export type TokenRequest = {
+  id: number;
+  tenant_id: number;
+  tenant_name?: string;
+  requested_by: number;
+  requested_by_name?: string;
+  amount: number;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | string;
+  reviewed_at?: string | null;
+  created_at: string;
+};
+
+export type PlatformOverview = {
+  account_count: number;
+  tenant_count?: number;
+  user_count: number;
+  survey_count: number;
+  response_count: number;
+  token_used: number;
+  token_used_today: number;
+  api_call_count: number;
+  pending_token_requests: number;
+  pending_reviews: number;
+};
+
+export type PlatformTenant = {
+  id: number;
+  name: string;
+  slug: string;
+  status: string;
+  plan: string;
+  token_balance: number;
+  token_used: number;
+  user_count: number;
+  survey_count: number;
+  created_at: string;
+};
+
+export type PlatformUser = {
+  id: number;
+  username: string;
+  display_name?: string | null;
+  email?: string | null;
+  role: string;
+  is_active: boolean;
+  tenant_id?: number | null;
+  tenant_name?: string | null;
+  workspace_name?: string | null;
+  token_used: number;
+  survey_count: number;
+  response_count: number;
+  api_call_count: number;
   created_at: string;
   updated_at: string;
 };

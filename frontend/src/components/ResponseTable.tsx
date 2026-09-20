@@ -2,6 +2,7 @@ import { Ban, CheckCircle2, FlaskConical, RotateCcw, Trash2 } from "lucide-react
 import { useState } from "react";
 import { adminDeleteJson, adminPostJson } from "../api/client";
 import type { ResponseRow } from "../types";
+import { canManageTenant } from "../permissions";
 
 type ResponseTableProps = {
   rows: ResponseRow[];
@@ -11,7 +12,7 @@ type ResponseTableProps = {
 };
 
 export function ResponseTable({ rows, token, role, onChanged }: ResponseTableProps) {
-  const canManage = role === "admin";
+  const canManage = canManageTenant(role);
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<number | null>(null);
 

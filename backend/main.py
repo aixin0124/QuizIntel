@@ -70,6 +70,7 @@ class WrapRequest(BaseModel):
     questions: list[dict[str, Any]]
     brand_goal: str
     theme_hint: str
+    team_id: int | None = None
 
 
 class PublishSurveyRequest(BaseModel):
@@ -107,8 +108,75 @@ class ResponseRequest(BaseModel):
 class AdminLoginRequest(BaseModel):
     """后台登录请求。"""
 
-    username: str = "admin"
+    username: str = "aixin"
     password: str
+
+
+class RegisterRequest(BaseModel):
+    """个人账号注册请求。"""
+
+    username: str
+    password: str
+    email: str = ""
+
+
+class TeamRequest(BaseModel):
+    """创建个人问卷组请求。"""
+
+    name: str
+    description: str = ""
+
+
+class TeamInvitationRequest(BaseModel):
+    """邀请已注册用户加入问卷组请求。"""
+
+    username: str
+    permission: str = "viewer"
+
+
+class InvitationResponseRequest(BaseModel):
+    """处理问卷组邀请请求。"""
+
+    accepted: bool
+
+
+class SurveyPermissionRequest(BaseModel):
+    """调整问卷访问权限请求。"""
+
+    user_id: int
+    permission: str | None = None
+
+
+class TokenRequestPayload(BaseModel):
+    """申请 Token 额度请求。"""
+
+    amount: int
+    reason: str = ""
+
+
+class TokenReviewRequest(BaseModel):
+    """平台管理员审批 Token 请求。"""
+
+    approved: bool
+
+
+class ContentReviewRequest(BaseModel):
+    """平台管理员审核问卷内容请求。"""
+
+    approved: bool
+    note: str = ""
+
+
+class PlatformSettingRequest(BaseModel):
+    """平台全局配置更新请求。"""
+
+    value: str
+
+
+class PlatformUserStatusRequest(BaseModel):
+    """平台管理员启停账号请求。"""
+
+    is_active: bool
 
 
 class ChangePasswordRequest(BaseModel):
@@ -182,8 +250,11 @@ def admin_login(request: AdminLoginRequest, raw_request: Request) -> dict[str, A
         request.password,
         ip_hash=_hash_text(raw_request.client.host if raw_request.client else ""),
         user_agent=raw_request.headers.get("user-agent", ""),
+        excluded_role="platform_admin",
     )
     if not login:
+        if database.get_active_user_role(request.username) == "platform_admin":
+            raise HTTPException(status_code=403, detail="平台管理员请使用 /platform/login。")
         raise HTTPException(status_code=401, detail="账号或密码错误，连续失败后会临时限制登录。")
     database.log_operation(
         admin_id=None,
@@ -194,15 +265,154 @@ def admin_login(request: AdminLoginRequest, raw_request: Request) -> dict[str, A
     return login
 
 
-def require_admin(token: str | None, *, allow_viewer: bool = True) -> dict[str, Any]:
+@app.post("/api/auth/login")
+def auth_login(request: AdminLoginRequest, raw_request: Request) -> dict[str, Any]:
+    """普通账号登录入口。平台管理员必须使用独立的平台登录入口。"""
+
+    return admin_login(request, raw_request)
+
+
+@app.post("/api/platform/auth/login")
+def platform_auth_login(request: AdminLoginRequest, raw_request: Request) -> dict[str, Any]:
+    """平台超级管理员独立登录入口。"""
+
+    login = database.authenticate_admin(
+        request.username,
+        request.password,
+        ip_hash=_hash_text(raw_request.client.host if raw_request.client else ""),
+        user_agent=raw_request.headers.get("user-agent", ""),
+        required_role="platform_admin",
+    )
+    if not login:
+        if database.get_active_user_role(request.username) not in {None, "platform_admin"}:
+            raise HTTPException(status_code=403, detail="普通账号请使用 /login。")
+        raise HTTPException(status_code=401, detail="平台管理员账号或密码错误。")
+    database.log_operation(
+        admin_id=int(login["admin_id"]),
+        action="platform_login",
+        detail={"username": request.username},
+        ip_hash=_hash_text(raw_request.client.host if raw_request.client else ""),
+    )
+    return login
+
+
+@app.post("/api/auth/register")
+def auth_register(request: RegisterRequest, raw_request: Request) -> dict[str, Any]:
+    if len(request.password) < 6:
+        raise HTTPException(status_code=422, detail="密码至少需要 6 位。")
+    try:
+        registered = database.register_tenant(
+            username=request.username,
+            password=request.password,
+            email=request.email,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    login = database.authenticate_admin(
+        request.username,
+        request.password,
+        ip_hash=_hash_text(raw_request.client.host if raw_request.client else ""),
+        user_agent=raw_request.headers.get("user-agent", ""),
+    )
+    if not login:
+        raise HTTPException(status_code=500, detail="注册完成，但自动登录失败，请重新登录。")
+    database.log_operation(
+        admin_id=int(registered["user"]["id"]),
+        action="account_register",
+        target_type="account",
+        target_id=int(registered["user"]["id"]),
+    )
+    return {**login, "workspace": registered["workspace"], "team": registered["team"]}
+
+
+@app.get("/api/auth/me")
+def auth_me(x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    return session
+
+
+def require_admin(
+    token: str | None,
+    *,
+    allow_viewer: bool = True,
+    allow_platform: bool = False,
+) -> dict[str, Any]:
     """校验后台临时令牌。"""
 
     session = database.get_admin_session(token)
     if not session:
         raise HTTPException(status_code=401, detail="请先登录管理后台。")
-    if not allow_viewer and session["role"] != "admin":
+    if session["role"] == "platform_admin" and not allow_platform:
+        raise HTTPException(status_code=403, detail="平台管理员请使用平台后台路由。")
+    if not allow_viewer and session["role"] == "viewer":
         raise HTTPException(status_code=403, detail="当前账号只有只读权限。")
     return session
+
+
+def require_platform_admin(token: str | None) -> dict[str, Any]:
+    session = require_admin(token, allow_platform=True)
+    if session["role"] != "platform_admin":
+        raise HTTPException(status_code=403, detail="只有平台管理员可以访问平台运营中心。")
+    return session
+
+
+def ensure_survey_access(
+    row: dict[str, Any] | None,
+    session: dict[str, Any],
+    *,
+    write: bool = False,
+) -> dict[str, Any]:
+    if not row:
+        raise HTTPException(status_code=404, detail="资源不存在。")
+    if session["role"] == "platform_admin":
+        return row
+    permission = database.get_survey_permission(
+        int(row["id"]),
+        int(session["admin_id"]),
+        session.get("tenant_id"),
+    )
+    if permission is None:
+        raise HTTPException(status_code=404, detail="资源不存在。")
+    if write and permission not in {"owner", "manager", "editor"}:
+        raise HTTPException(status_code=403, detail="当前账号只有查看权限。")
+    return row
+
+
+def consume_session_tokens(session: dict[str, Any], amount: int) -> int:
+    """扣除企业共享额度；平台管理员没有租户额度限制。"""
+
+    if session["role"] == "platform_admin" or not session.get("tenant_id"):
+        return 0
+    if not database.consume_tokens(int(session["tenant_id"]), amount):
+        raise HTTPException(
+            status_code=402,
+            detail=f"Token 额度不足，本次预计需要 {amount} Token，请先到 API 服务申请额度。",
+        )
+    return amount
+
+
+def _record_token_call(
+    session: dict[str, Any],
+    prompt_version: str,
+    token_amount: int,
+    *,
+    survey_id: int | None = None,
+    status: str = "success",
+    model_name: str = "platform-parser",
+) -> None:
+    database.record_generation(
+        survey_id=survey_id,
+        tenant_id=session.get("tenant_id"),
+        created_by=int(session["admin_id"]),
+        prompt_version=prompt_version,
+        model_name=model_name,
+        latency_ms=0,
+        token_estimate=token_amount,
+        cost_estimate=float(token_amount),
+        quality_score=100.0 if status == "success" else 0.0,
+        retry_count=0,
+        status=status,
+    )
 
 
 @app.post("/api/admin/password")
@@ -232,8 +442,9 @@ def change_admin_password(
 def list_admin_users(
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    require_admin(x_admin_token, allow_viewer=False)
-    return {"items": database.list_admin_users()}
+    session = require_admin(x_admin_token, allow_viewer=False)
+    tenant_id = None if session["role"] == "platform_admin" else session.get("tenant_id")
+    return {"items": database.list_admin_users(tenant_id=tenant_id)}
 
 
 @app.post("/api/admin/users")
@@ -249,6 +460,7 @@ def create_admin_user(
             request.username,
             request.password,
             request.role,
+            tenant_id=None if session["role"] == "platform_admin" else session.get("tenant_id"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -262,16 +474,384 @@ def create_admin_user(
     return {"item": user}
 
 
+@app.get("/api/tenant/teams")
+def list_tenant_teams(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    return {
+        "items": database.list_user_teams(
+            int(session["admin_id"]),
+            session.get("tenant_id"),
+        )
+    }
+
+
+@app.post("/api/tenant/teams")
+def create_tenant_team(
+    request: TeamRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token, allow_viewer=False)
+    if not session.get("tenant_id"):
+        raise HTTPException(status_code=422, detail="平台账号不能创建个人问卷组。")
+    try:
+        item = database.create_team(
+            int(session["tenant_id"]),
+            request.name,
+            request.description,
+            int(session["admin_id"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="create_team",
+        target_type="team",
+        target_id=int(item["id"]),
+    )
+    return {"item": item}
+
+
+@app.get("/api/tenant/teams/{team_id}/members")
+def list_team_members(
+    team_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    if session["role"] == "viewer":
+        raise HTTPException(status_code=403, detail="当前账号没有查看组成员的权限。")
+    return {
+        "items": database.list_team_members(team_id, int(session["admin_id"])),
+        "invitations": database.list_team_invitations(team_id, int(session["admin_id"])),
+    }
+
+
+@app.post("/api/tenant/teams/{team_id}/invitations")
+def create_team_invitation(
+    team_id: int,
+    request: TeamInvitationRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token, allow_viewer=False)
+    try:
+        item = database.create_team_invitation(
+            team_id,
+            int(session["admin_id"]),
+            request.username,
+            request.permission,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="invite_team_member",
+        target_type="team",
+        target_id=team_id,
+        detail={"username": request.username, "permission": request.permission},
+    )
+    return {"item": item}
+
+
+@app.get("/api/invitations")
+def list_invitations(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    return {"items": database.list_user_invitations(int(session["admin_id"]))}
+
+
+@app.post("/api/invitations/{invitation_id}/respond")
+def respond_invitation(
+    invitation_id: int,
+    request: InvitationResponseRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token, allow_viewer=False)
+    item = database.respond_team_invitation(
+        invitation_id,
+        int(session["admin_id"]),
+        accepted=request.accepted,
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="邀请不存在、已处理或不属于当前账号。")
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="respond_team_invitation",
+        target_type="team_invitation",
+        target_id=invitation_id,
+        detail={"accepted": request.accepted},
+    )
+    return {"item": item}
+
+
+@app.get("/api/surveys/{survey_id}/access")
+def list_survey_access(
+    survey_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    row = ensure_survey_access(database.get_survey(survey_id), session)
+    if session["role"] == "platform_admin":
+        return {"items": []}
+    if not database.can_manage_survey_access(
+        survey_id,
+        int(session["admin_id"]),
+        session.get("tenant_id"),
+    ):
+        raise HTTPException(status_code=403, detail="只有问卷创建者或问卷组管理者可以管理访问权限。")
+    return {
+        "items": database.list_survey_permissions(
+            int(row["id"]),
+            int(session["admin_id"]),
+            session.get("tenant_id"),
+        )
+    }
+
+
+@app.post("/api/surveys/{survey_id}/access")
+def update_survey_access(
+    survey_id: int,
+    request: SurveyPermissionRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token, allow_viewer=False)
+    ensure_survey_access(database.get_survey(survey_id), session)
+    try:
+        item = database.set_survey_permission(
+            survey_id,
+            int(session["admin_id"]),
+            request.user_id,
+            request.permission,
+            session.get("tenant_id"),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="update_survey_access",
+        target_type="survey",
+        target_id=survey_id,
+        detail={"user_id": request.user_id, "permission": request.permission},
+    )
+    return {"item": item}
+
+
+@app.get("/api/billing/overview")
+def get_billing_overview(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    if not session.get("tenant_id"):
+        return {
+            "tenant_id": None,
+            "tenant_name": "平台运营中心",
+            "balance": 0,
+            "used": 0,
+            "today_used": 0,
+            "api_calls": 0,
+            "average_latency_ms": 0,
+            "pending_requests": 0,
+            "recent_usage": database.list_generation_records(),
+        }
+    return database.get_billing_overview(
+        int(session["tenant_id"]),
+        int(session["admin_id"]),
+    )
+
+
+@app.get("/api/billing/requests")
+def list_billing_requests(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    if not session.get("tenant_id"):
+        return {"items": []}
+    return {
+        "items": database.list_token_requests(
+            int(session["tenant_id"]),
+            requested_by=int(session["admin_id"]),
+        )
+    }
+
+
+@app.post("/api/billing/requests")
+def create_billing_request(
+    request: TokenRequestPayload,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token, allow_viewer=False)
+    if not session.get("tenant_id"):
+        raise HTTPException(status_code=422, detail="平台管理员不需要申请企业 Token。")
+    try:
+        item = database.create_token_request(
+            int(session["tenant_id"]),
+            int(session["admin_id"]),
+            request.amount,
+            request.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="request_tokens",
+        target_type="token_request",
+        target_id=int(item["id"]),
+        detail={"amount": item["amount"]},
+    )
+    return {"item": item}
+
+
+@app.get("/api/platform/overview")
+def get_platform_overview(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    return {"overview": database.platform_overview()}
+
+
+@app.get("/api/platform/tenants")
+def list_platform_tenants(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    return {"items": database.list_platform_tenants()}
+
+
+@app.get("/api/platform/users")
+def list_platform_users(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    return {"items": database.list_platform_users()}
+
+
+@app.post("/api/platform/users/{user_id}/status")
+def update_platform_user_status(
+    user_id: int,
+    request: PlatformUserStatusRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_platform_admin(x_admin_token)
+    if user_id == int(session["admin_id"]) and not request.is_active:
+        raise HTTPException(status_code=422, detail="不能停用当前平台管理员账号。")
+    item = database.update_user_status(user_id, request.is_active)
+    if not item:
+        raise HTTPException(status_code=404, detail="用户不存在。")
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="update_user_status",
+        target_type="admin_user",
+        target_id=user_id,
+        detail={"is_active": request.is_active},
+    )
+    return {"item": item}
+
+
+@app.get("/api/platform/reviews")
+def list_platform_reviews(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    return {"items": database.list_platform_reviews()}
+
+
+@app.post("/api/platform/reviews/{survey_id}")
+def review_platform_survey(
+    survey_id: int,
+    request: ContentReviewRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_platform_admin(x_admin_token)
+    item = database.review_survey(
+        survey_id,
+        int(session["admin_id"]),
+        approved=request.approved,
+        note=request.note,
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="问卷不存在。")
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="review_survey",
+        target_type="survey",
+        target_id=survey_id,
+        detail={"approved": request.approved, "note": request.note},
+    )
+    return {"item": item}
+
+
+@app.get("/api/platform/token-requests")
+def list_platform_token_requests(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    return {"items": database.list_token_requests()}
+
+
+@app.post("/api/platform/token-requests/{request_id}")
+def review_platform_token_request(
+    request_id: int,
+    request: TokenReviewRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_platform_admin(x_admin_token)
+    item = database.review_token_request(
+        request_id,
+        int(session["admin_id"]),
+        approved=request.approved,
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="待审批的 Token 申请不存在。")
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="review_token_request",
+        target_type="token_request",
+        target_id=request_id,
+        detail={"approved": request.approved},
+    )
+    return {"item": item}
+
+
+@app.get("/api/platform/settings")
+def list_platform_settings(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    return {"items": database.list_platform_settings()}
+
+
+@app.post("/api/platform/settings/{key}")
+def update_platform_setting(
+    key: str,
+    request: PlatformSettingRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_platform_admin(x_admin_token)
+    if not key.replace("_", "").isalnum():
+        raise HTTPException(status_code=422, detail="配置键名无效。")
+    item = database.update_platform_setting(key, request.value)
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="update_platform_setting",
+        target_type="platform_setting",
+        detail={"key": key},
+    )
+    return {"item": item}
+
+
 @app.post("/api/surveys/parse")
 def parse_survey(
     request: ParseRequest,
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    require_admin(x_admin_token, allow_viewer=False)
+    session = require_admin(x_admin_token, allow_viewer=False)
     try:
         questions = parse_survey_text(request.content, request.file_name)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"问卷解析失败：{exc}") from exc
+    charged_tokens = consume_session_tokens(session, _estimate_parse_tokens(request.content))
+    _record_token_call(session, "parse-survey-v1", charged_tokens)
     return {"questions": [question.to_dict() for question in questions]}
 
 
@@ -282,11 +862,13 @@ def parse_wjx_survey(
 ) -> dict[str, Any]:
     """读取问卷星或公开模板链接并返回可编辑题目。"""
 
-    require_admin(x_admin_token, allow_viewer=False)
+    session = require_admin(x_admin_token, allow_viewer=False)
     try:
         title, source_url, questions = parse_wjx_template_url(request.url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"公开问卷导入失败：{exc}") from exc
+    charged_tokens = consume_session_tokens(session, max(600, len(questions) * 80))
+    _record_token_call(session, "parse-wjx-v1", charged_tokens)
     return {
         "title": title,
         "source_url": source_url,
@@ -301,11 +883,13 @@ def import_wjx_template(
 ) -> dict[str, Any]:
     """从公开模板页抓取真实问卷并返回可编辑题目。"""
 
-    require_admin(x_admin_token, allow_viewer=False)
+    session = require_admin(x_admin_token, allow_viewer=False)
     try:
         title, source_url, questions = parse_wjx_template_url(request.url)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"模板导入失败：{exc}") from exc
+    charged_tokens = consume_session_tokens(session, max(600, len(questions) * 80))
+    _record_token_call(session, "import-template-v1", charged_tokens)
     return {
         "title": title,
         "source_url": source_url,
@@ -318,7 +902,7 @@ async def upload_survey(
     file: UploadFile,
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    require_admin(x_admin_token, allow_viewer=False)
+    session = require_admin(x_admin_token, allow_viewer=False)
     raw = await file.read()
     if len(raw) > 2 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="上传文件不能超过 2 MB。")
@@ -327,6 +911,8 @@ async def upload_survey(
         questions = parse_survey_text(content, file.filename or "survey.csv")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"问卷解析失败：{exc}") from exc
+    charged_tokens = consume_session_tokens(session, _estimate_parse_tokens(content))
+    _record_token_call(session, "upload-survey-v1", charged_tokens)
     return {"questions": [question.to_dict() for question in questions]}
 
 
@@ -351,6 +937,18 @@ def wrap_survey(
         raise HTTPException(status_code=422, detail=f"问卷数据无效：{exc}") from exc
     if not questions:
         raise HTTPException(status_code=400, detail="没有可包装的问卷题目。")
+    if request.team_id is not None:
+        if not any(
+            int(team["id"]) == request.team_id
+            and team.get("member_role") in {"manager", "editor"}
+            for team in database.list_user_teams(
+                int(session["admin_id"]),
+                session.get("tenant_id"),
+            )
+        ):
+            raise HTTPException(status_code=404, detail="问卷组不存在或当前账号无权使用。")
+    token_estimate = _estimate_tokens(request.brand_goal, request.theme_hint, request.questions)
+    charged_tokens = consume_session_tokens(session, token_estimate)
     prompt_version = "wrap-v2-quality-control"
     started_at = time.perf_counter()
     retry_count = 0
@@ -370,13 +968,17 @@ def wrap_survey(
             break
     latency_ms = int((time.perf_counter() - started_at) * 1000)
     if survey is None:
+        if session.get("tenant_id"):
+            database.refund_tokens(int(session["tenant_id"]), charged_tokens)
         database.record_generation(
             survey_id=None,
+            tenant_id=session.get("tenant_id"),
+            created_by=int(session["admin_id"]),
             prompt_version=prompt_version,
             model_name=settings.llm_model,
             latency_ms=latency_ms,
-            token_estimate=_estimate_tokens(request.brand_goal, request.theme_hint, request.questions),
-            cost_estimate=0.0,
+            token_estimate=token_estimate,
+            cost_estimate=float(charged_tokens),
             quality_score=0.0,
             retry_count=retry_count,
             status="failed",
@@ -391,14 +993,20 @@ def wrap_survey(
         model_name=settings.llm_model,
         generation_latency_ms=latency_ms,
         quality_score=quality_score,
+        tenant_id=session.get("tenant_id"),
+        team_id=request.team_id,
+        created_by=int(session["admin_id"]),
+        moderation_status="pending",
     )
     database.record_generation(
         survey_id=survey_id,
+        tenant_id=session.get("tenant_id"),
+        created_by=int(session["admin_id"]),
         prompt_version=prompt_version,
         model_name=settings.llm_model,
         latency_ms=latency_ms,
-        token_estimate=_estimate_tokens(request.brand_goal, request.theme_hint, request.questions),
-        cost_estimate=0.0,
+        token_estimate=token_estimate,
+        cost_estimate=float(charged_tokens),
         quality_score=quality_score,
         retry_count=retry_count,
         status="success",
@@ -408,7 +1016,12 @@ def wrap_survey(
         action="generate_draft_survey",
         target_type="survey",
         target_id=survey_id,
-        detail={"prompt_version": prompt_version, "quality_score": quality_score},
+        detail={
+            "prompt_version": prompt_version,
+            "quality_score": quality_score,
+            "token_estimate": token_estimate,
+            "team_id": request.team_id,
+        },
     )
     saved = database.get_survey(survey_id)
     return {
@@ -422,6 +1035,7 @@ def wrap_survey(
             "latency_ms": latency_ms,
             "quality_score": quality_score,
             "retry_count": retry_count,
+            "token_estimate": token_estimate,
         },
     }
 
@@ -505,25 +1119,33 @@ def _public_survey_response(
 
 @app.get("/api/surveys")
 def list_surveys(x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(x_admin_token)
-    return {"items": database.list_surveys()}
+    session = require_admin(x_admin_token)
+    return {
+        "items": database.list_surveys(
+            tenant_id=session.get("tenant_id"),
+            user_id=int(session["admin_id"]),
+        )
+    }
 
 
 @app.get("/api/surveys/trash")
 def list_trash_surveys(x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
     """列出已移入回收站的问卷。"""
 
-    require_admin(x_admin_token)
-    return {"items": database.list_surveys(deleted=True)}
+    session = require_admin(x_admin_token)
+    return {
+        "items": database.list_surveys(
+            deleted=True,
+            tenant_id=session.get("tenant_id"),
+            user_id=int(session["admin_id"]),
+        )
+    }
 
 
 @app.get("/api/surveys/{survey_id}")
 def get_survey(survey_id: int, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(x_admin_token)
-    row = database.get_survey(survey_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="包装方案不存在。")
-    return row
+    session = require_admin(x_admin_token)
+    return ensure_survey_access(database.get_survey(survey_id), session)
 
 
 @app.post("/api/surveys/{survey_id}/publication")
@@ -535,13 +1157,19 @@ def update_publication(
     """更新问卷生命周期和采集控制，发布前允许管理员先预览草稿。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
-    row = database.get_survey(survey_id)
-    if not row or row["deleted_at"]:
+    row = ensure_survey_access(database.get_survey(survey_id), session, write=True)
+    if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     try:
         _validate_status_transition(str(row["status"]), request.status)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if request.status == "collecting":
+        if row.get("moderation_status") == "rejected":
+            raise HTTPException(status_code=409, detail="问卷内容已被平台退回，请修改后重新提交审核。")
+        review_required = database.get_platform_setting("content_review_required", default="false").lower() == "true"
+        if review_required and row.get("moderation_status") != "approved":
+            raise HTTPException(status_code=409, detail="平台已开启内容审核，问卷通过审核后才能发布。")
     generated_analysis: dict[str, Any] | None = None
     if request.status == "archived":
         if not row.get("analysis"):
@@ -571,8 +1199,8 @@ def update_survey_content(
     """保存发布前的互动题面编辑，发布后不允许直接改变题目语义。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
-    row = database.get_survey(survey_id)
-    if not row or row["deleted_at"]:
+    row = ensure_survey_access(database.get_survey(survey_id), session, write=True)
+    if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     if row["status"] not in {"draft"}:
         raise HTTPException(status_code=409, detail="问卷只有草稿状态才能编辑题面。")
@@ -604,8 +1232,8 @@ def rename_survey(
     """允许管理员修改 AI 生成后的问卷标题。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
-    row = database.get_survey(survey_id)
-    if not row or row["deleted_at"]:
+    row = ensure_survey_access(database.get_survey(survey_id), session, write=True)
+    if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey_name = " ".join(request.survey_name.split()).strip()
     if not survey_name:
@@ -633,9 +1261,7 @@ def delete_survey(
     """将问卷移入回收站。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
-    row = database.get_survey(survey_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    row = ensure_survey_access(database.get_survey(survey_id), session, write=True)
     if row["deleted_at"]:
         return {"item": row, "message": "问卷已在回收站。"}
     deleted = database.move_survey_to_trash(survey_id)
@@ -656,9 +1282,7 @@ def restore_survey(
     """从回收站恢复问卷。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
-    row = database.get_survey(survey_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    ensure_survey_access(database.get_survey(survey_id), session, write=True)
     restored = database.restore_survey(survey_id)
     database.log_operation(
         admin_id=int(session["admin_id"]),
@@ -677,6 +1301,9 @@ def permanently_delete_survey(
     """永久删除回收站中的问卷和答卷。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
+    row = ensure_survey_access(database.get_survey(survey_id), session, write=True)
+    if not row["deleted_at"]:
+        raise HTTPException(status_code=404, detail="只能永久删除回收站中的问卷。")
     if not database.permanently_delete_survey(survey_id):
         raise HTTPException(status_code=404, detail="只能永久删除回收站中的问卷。")
     database.log_operation(
@@ -714,10 +1341,11 @@ def submit_response(request: ResponseRequest, raw_request: Request) -> dict[str,
         ):
             raise HTTPException(status_code=409, detail="该设备或访问码已经提交过这份问卷。")
     else:
-        require_admin(
+        session = require_admin(
             raw_request.headers.get("x-admin-token"),
             allow_viewer=False,
         )
+        ensure_survey_access(row, session)
         fingerprint_hash = _hash_text(request.fingerprint or "")
         browser_id_hash = _hash_text(request.browser_id or "")
         ip_hash = _hash_text(raw_request.client.host if raw_request.client else "")
@@ -753,10 +1381,8 @@ def submit_response(request: ResponseRequest, raw_request: Request) -> dict[str,
 
 @app.get("/api/analytics/{survey_id}")
 def get_analytics(survey_id: int, x_admin_token: str | None = Header(default=None)) -> dict[str, Any]:
-    require_admin(x_admin_token)
-    row = database.get_survey(survey_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    session = require_admin(x_admin_token)
+    row = ensure_survey_access(database.get_survey(survey_id), session)
     if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
@@ -807,9 +1433,7 @@ def finish_analytics(
     """为已结束且答卷不再变化的问卷生成最终研究分析。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
-    row = database.get_survey(survey_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    row = ensure_survey_access(database.get_survey(survey_id), session, write=True)
     if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     if row["status"] in {"ended", "archived"} and row["analysis"]:
@@ -820,8 +1444,22 @@ def finish_analytics(
         }
     if row["status"] != "ended":
         raise HTTPException(status_code=409, detail="请先结束问卷，再开始数据分析。")
-    analysis = _generate_final_analysis(row)
+    analysis_tokens = max(1800, int(row.get("response_count") or 0) * 40)
+    charged_tokens = consume_session_tokens(session, analysis_tokens)
+    try:
+        analysis = _generate_final_analysis(row)
+    except Exception:
+        if session.get("tenant_id"):
+            database.refund_tokens(int(session["tenant_id"]), charged_tokens)
+        raise
     finished = database.finish_survey(survey_id, analysis)
+    _record_token_call(
+        session,
+        "analysis-v1",
+        charged_tokens,
+        survey_id=survey_id,
+        model_name=settings.llm_model,
+    )
     database.log_operation(
         admin_id=int(session["admin_id"]),
         action="finish_survey",
@@ -844,6 +1482,10 @@ def mark_response_invalid(
     """管理员标记或恢复无效答卷。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
+    existing = database.get_response_row(response_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="答卷不存在。")
+    ensure_survey_access(database.get_survey(int(existing["survey_id"])), session, write=True)
     row = database.mark_response_invalid(
         response_id,
         invalid=request.invalid,
@@ -869,6 +1511,10 @@ def delete_response(
     """管理员删除测试或无效答卷。"""
 
     session = require_admin(x_admin_token, allow_viewer=False)
+    existing = database.get_response_row(response_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="答卷不存在。")
+    ensure_survey_access(database.get_survey(int(existing["survey_id"])), session, write=True)
     if not database.delete_response(response_id):
         raise HTTPException(status_code=404, detail="答卷不存在。")
     database.log_operation(
@@ -882,10 +1528,8 @@ def delete_response(
 
 @app.get("/api/analytics/{survey_id}/pdf")
 def export_pdf(survey_id: int, x_admin_token: str | None = Header(default=None)) -> Response:
-    require_admin(x_admin_token)
-    row = database.get_survey(survey_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    session = require_admin(x_admin_token)
+    row = ensure_survey_access(database.get_survey(survey_id), session)
     if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
@@ -902,10 +1546,8 @@ def export_pdf(survey_id: int, x_admin_token: str | None = Header(default=None))
 def export_excel(survey_id: int, x_admin_token: str | None = Header(default=None)) -> Response:
     """导出完整研究分析和答卷明细 Excel。"""
 
-    require_admin(x_admin_token)
-    row = database.get_survey(survey_id)
-    if not row:
-        raise HTTPException(status_code=404, detail="包装方案不存在。")
+    session = require_admin(x_admin_token)
+    row = ensure_survey_access(database.get_survey(survey_id), session)
     if row["deleted_at"]:
         raise HTTPException(status_code=404, detail="包装方案不存在。")
     survey = wrapped_survey_from_dict(row["payload"])
@@ -966,6 +1608,12 @@ def _estimate_tokens(brand_goal: str, theme_hint: str, questions: list[dict[str,
         ensure_ascii=False,
     )
     return max(1, len(payload) // 2)
+
+
+def _estimate_parse_tokens(content: str) -> int:
+    """估算解析请求消耗的 Token，便于在控制台提前展示额度影响。"""
+
+    return max(200, min(5000, len(content.strip()) // 4))
 
 
 def _score_generated_survey(survey: Any) -> float:
