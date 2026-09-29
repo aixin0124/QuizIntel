@@ -1,6 +1,7 @@
 """问卷包装模块的基础测试。"""
 
 from io import BytesIO
+import sqlite3
 from types import SimpleNamespace
 from unittest.mock import patch
 from zipfile import ZipFile
@@ -880,6 +881,36 @@ def test_billing_overview_isolated_by_account(tmp_path) -> None:
     assert second_overview["used"] == 654
     assert second_overview["api_calls"] == 1
     assert [item["token_estimate"] for item in second_overview["recent_usage"]] == [654]
+
+
+def test_database_removes_legacy_collaboration_schema(tmp_path) -> None:
+    database_path = tmp_path / "legacy-collaboration.sqlite"
+    ResearchDatabase(str(database_path))
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE teams (id INTEGER);
+        CREATE TABLE team_members (team_id INTEGER);
+        CREATE TABLE team_invitations (id INTEGER);
+        CREATE TABLE survey_permissions (survey_id INTEGER);
+        ALTER TABLE wrapped_surveys ADD COLUMN team_id INTEGER;
+        ALTER TABLE generation_records ADD COLUMN team_id INTEGER;
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    ResearchDatabase(str(database_path))
+
+    connection = sqlite3.connect(database_path)
+    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master")}
+    survey_columns = {row[1] for row in connection.execute("PRAGMA table_info(wrapped_surveys)")}
+    generation_columns = {row[1] for row in connection.execute("PRAGMA table_info(generation_records)")}
+    connection.close()
+
+    assert not tables.intersection({"teams", "team_members", "team_invitations", "survey_permissions"})
+    assert "team_id" not in survey_columns
+    assert "team_id" not in generation_columns
 
 
 def test_llm_service_falls_back_to_tokenrhythm(monkeypatch) -> None:

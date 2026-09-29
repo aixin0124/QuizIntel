@@ -46,10 +46,10 @@ export function AuthPage({ mode, onAuthenticated }: AuthPageProps) {
       <div className="auth-aside">
         <p className="eyebrow">FUN RESEARCH PLATFORM</p>
         <h1>让每一次调研，都有一个清晰的工作区。</h1>
-        <p>个人问卷、可选协作、API Token 和平台治理统一在同一套账号体系里。</p>
+        <p>个人问卷、API Token 和平台治理统一在同一套账号体系里。</p>
         <div className="auth-aside-points">
           <span><ShieldCheck size={16} /> 每个账号拥有独立问卷空间</span>
-          <span><UserPlus size={16} /> 可邀请成员协作管理问卷</span>
+          <span><ShieldCheck size={16} /> 每份问卷默认归创建账号管理</span>
           <span><KeyRound size={16} /> 生成与解析用量透明可见</span>
         </div>
       </div>

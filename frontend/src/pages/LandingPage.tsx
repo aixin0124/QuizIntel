@@ -1,4 +1,4 @@
-import { ArrowRight, BarChart3, CheckCircle2, ChevronRight, FileText, KeyRound, Layers3, Play, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { ArrowRight, BarChart3, CheckCircle2, ChevronRight, FileText, KeyRound, Layers3, Play, ShieldCheck, Sparkles } from "lucide-react";
 
 type LandingPageProps = {
   authenticated: boolean;
@@ -16,7 +16,7 @@ export function LandingPage({ authenticated }: LandingPageProps) {
           <p className="eyebrow">FUN RESEARCH PLATFORM</p>
           <h1>把问卷，变成真正能被理解的研究。</h1>
           <p className="landing-lead">
-            趣测智研是一套面向个人研究者与协作小组的 AI 问卷平台：从题目导入、互动包装，到回收、分析和结果导出，都在一个清晰的工作区里完成。
+            趣测智研是一套面向个人研究者的 AI 问卷平台：从题目导入、互动包装，到回收、分析和结果导出，都在一个清晰的工作区里完成。
           </p>
           <div className="landing-actions">
             <button className="primary landing-primary" onClick={() => go(authenticated ? "/console" : "/register")}>
@@ -41,7 +41,7 @@ export function LandingPage({ authenticated }: LandingPageProps) {
             <div className="landing-visual-sidebar">
               <span className="visual-sidebar-active"><BarChart3 size={14} /> 数据总览</span>
               <span><Sparkles size={14} /> AI 问卷</span>
-              <span><Users size={14} /> 协作成员</span>
+              <span><ShieldCheck size={14} /> 个人问卷</span>
               <span><KeyRound size={14} /> API 服务</span>
             </div>
             <div className="landing-visual-dashboard">
@@ -65,8 +65,8 @@ export function LandingPage({ authenticated }: LandingPageProps) {
       </section>
 
       <section className="landing-service-band">
-        <div><strong>产品能力</strong><span>把研究流程收拢成可协作的服务</span></div>
-        <div><strong>可选协作</strong><span>个人独立管理，需要时再邀请成员访问指定问卷</span></div>
+        <div><strong>产品能力</strong><span>把研究流程收拢成清晰的个人工作区</span></div>
+        <div><strong>个人管理</strong><span>新建问卷默认归创建账号管理</span></div>
         <div><strong>开放 API</strong><span>按 Token 管理生成与解析用量</span></div>
         <div><strong>运营治理</strong><span>平台管理员统一审核与配置</span></div>
       </section>
@@ -80,7 +80,7 @@ export function LandingPage({ authenticated }: LandingPageProps) {
           <article><div className="landing-feature-icon"><FileText size={20} /></div><h3>快速导入问卷</h3><p>支持公开问卷链接和结构化文件，保留原始题目与研究字段。</p><button onClick={() => go("/login")}>了解问卷工作区 <ChevronRight size={15} /></button></article>
           <article><div className="landing-feature-icon green"><Sparkles size={20} /></div><h3>AI 互动包装</h3><p>围绕调研目标重新设计题面、主题维度和结果反馈，生成后仍可人工校准。</p><button onClick={() => go("/login")}>了解 AI 服务 <ChevronRight size={15} /></button></article>
           <article><div className="landing-feature-icon orange"><BarChart3 size={20} /></div><h3>数据回收与分析</h3><p>从分享链接、答卷明细到统计图表与研究分析，形成可追溯闭环。</p><button onClick={() => go("/login")}>查看分析能力 <ChevronRight size={15} /></button></article>
-          <article><div className="landing-feature-icon purple"><ShieldCheck size={20} /></div><h3>平台级治理</h3><p>账号、成员权限、额度、用量和内容审核分层管理，为开放平台预留运营边界。</p><button onClick={() => go("/platform/login")}>查看平台架构 <ChevronRight size={15} /></button></article>
+          <article><div className="landing-feature-icon purple"><ShieldCheck size={20} /></div><h3>平台级治理</h3><p>账号、额度、用量和内容审核分层管理，为开放平台预留运营边界。</p><button onClick={() => go("/platform/login")}>查看平台架构 <ChevronRight size={15} /></button></article>
         </div>
       </section>
 
@@ -91,7 +91,7 @@ export function LandingPage({ authenticated }: LandingPageProps) {
         <div className="landing-steps">
           <article><span>01</span><div><h3>创建个人空间</h3><p>注册账号后，所有问卷默认归你管理，同时获得可追踪的 Token 额度。</p></div></article>
           <article><span>02</span><div><h3>生成并发布问卷</h3><p>导入题目，调用 AI 生成互动包装，再发布专属分享链接。</p></div></article>
-          <article><span>03</span><div><h3>按需邀请协作者</h3><p>需要共同维护时，邀请已注册成员，并按单份问卷设置仅查看或可编辑权限。</p></div></article>
+          <article><span>03</span><div><h3>查看研究结果</h3><p>发布专属分享链接，回收答卷后查看统计、分析和可提交的研究报告。</p></div></article>
         </div>
       </section>
 

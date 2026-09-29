@@ -4006,8 +4006,7 @@ small {
 }
 
 .api-service-page,
-.platform-page,
-.team-page {
+.platform-page {
   padding: 42px 0 72px;
 }
 
@@ -4596,230 +4595,6 @@ small {
   white-space: nowrap;
 }
 
-.team-grid {
-  display: grid;
-  grid-template-columns: minmax(300px, 0.68fr) minmax(0, 1fr);
-  gap: 16px;
-  margin-top: 22px;
-}
-
-.team-create-form button {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 18px;
-}
-
-.team-list {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-}
-
-.team-card {
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  gap: 13px;
-  border: 1px solid #dfe5ec;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 17px;
-}
-
-.team-card-icon {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  border-radius: 6px;
-  background: #edf4ff;
-  color: #2467e8;
-}
-
-.team-card strong {
-  color: #344352;
-  font-size: 15px;
-}
-
-.team-card p {
-  margin: 5px 0 8px;
-  color: #788594;
-  font-size: 12px;
-}
-
-.team-card small {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #8995a2;
-  font-size: 11px;
-}
-
-.team-card {
-  position: relative;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
-  width: 100%;
-  text-align: left;
-  cursor: pointer;
-}
-
-.team-card:hover,
-.team-card.selected {
-  border-color: #9dbcf5;
-  background: #f8fbff;
-}
-
-.team-card > em {
-  align-self: start;
-  border-radius: 999px;
-  background: #edf4ff;
-  color: #2467e8;
-  padding: 4px 7px;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.invitation-inbox {
-  margin-top: 16px;
-}
-
-.inbox-count {
-  display: grid;
-  min-width: 27px;
-  height: 27px;
-  place-items: center;
-  border-radius: 50%;
-  background: #edf4ff;
-  color: #2467e8;
-  font-size: 12px;
-}
-
-.invitation-list,
-.member-list,
-.permission-list {
-  display: grid;
-  gap: 8px;
-}
-
-.invitation-row,
-.member-row,
-.permission-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-top: 1px solid #e5eaf0;
-  padding: 12px 0;
-}
-
-.invitation-row > div:first-child {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 4px;
-}
-
-.invitation-row strong,
-.member-row strong {
-  color: #344352;
-  font-size: 13px;
-}
-
-.invitation-row span,
-.member-row small {
-  color: #788594;
-  font-size: 11px;
-}
-
-.invitation-row small {
-  color: #a0aab5;
-  font-size: 10px;
-}
-
-.team-management-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.invite-form,
-.access-form {
-  margin-bottom: 15px;
-}
-
-.invite-row,
-.access-form-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px auto;
-  gap: 8px;
-}
-
-.access-form-row {
-  grid-template-columns: 120px auto;
-  margin-top: 8px;
-}
-
-.member-avatar {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 50%;
-  background: #edf4ff;
-  color: #2467e8;
-}
-
-.member-row > div:nth-child(2) {
-  display: grid;
-  min-width: 0;
-  flex: 1;
-  gap: 3px;
-}
-
-.member-row > em,
-.permission-row > em {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: #788594;
-  font-size: 11px;
-  font-style: normal;
-  white-space: nowrap;
-}
-
-.sent-invites {
-  display: grid;
-  gap: 7px;
-  margin-top: 15px;
-  border-top: 1px solid #e5eaf0;
-  padding-top: 13px;
-}
-
-.sent-invites h4 {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  color: #526277;
-  font-size: 12px;
-}
-
-.sent-invites span {
-  color: #788594;
-  font-size: 11px;
-}
-
-.permission-list {
-  margin: 14px 0;
-}
-
-.permission-row {
-  justify-content: space-between;
-}
-
 .security-role-card {
   display: grid;
   gap: 8px;
@@ -4945,8 +4720,7 @@ small {
   .landing-steps,
   .auth-page,
   .api-main-grid,
-  .platform-shell,
-  .team-grid {
+  .platform-shell {
     grid-template-columns: 1fr;
   }
 
@@ -4980,10 +4754,6 @@ small {
   .platform-request-list article,
   .platform-review-list article,
   .setting-row {
-    grid-template-columns: 1fr;
-  }
-
-  .team-management-grid {
     grid-template-columns: 1fr;
   }
 

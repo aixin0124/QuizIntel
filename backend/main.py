@@ -70,7 +70,6 @@ class WrapRequest(BaseModel):
     questions: list[dict[str, Any]]
     brand_goal: str
     theme_hint: str
-    team_id: int | None = None
 
 
 class PublishSurveyRequest(BaseModel):
@@ -118,33 +117,6 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     email: str = ""
-
-
-class TeamRequest(BaseModel):
-    """创建个人问卷组请求。"""
-
-    name: str
-    description: str = ""
-
-
-class TeamInvitationRequest(BaseModel):
-    """邀请已注册用户加入问卷组请求。"""
-
-    username: str
-    permission: str = "viewer"
-
-
-class InvitationResponseRequest(BaseModel):
-    """处理问卷组邀请请求。"""
-
-    accepted: bool
-
-
-class SurveyPermissionRequest(BaseModel):
-    """调整问卷访问权限请求。"""
-
-    user_id: int
-    permission: str | None = None
 
 
 class TokenRequestPayload(BaseModel):
@@ -322,7 +294,7 @@ def auth_register(request: RegisterRequest, raw_request: Request) -> dict[str, A
         target_type="account",
         target_id=int(registered["user"]["id"]),
     )
-    return {**login, "workspace": registered["workspace"], "team": registered["team"]}
+    return {**login, "workspace": registered["workspace"]}
 
 
 @app.get("/api/auth/me")
@@ -366,20 +338,19 @@ def ensure_survey_access(
         raise HTTPException(status_code=404, detail="资源不存在。")
     if session["role"] == "platform_admin":
         return row
-    permission = database.get_survey_permission(
+    if not database.can_manage_survey(
         int(row["id"]),
         int(session["admin_id"]),
         session.get("tenant_id"),
-    )
-    if permission is None:
+    ):
         raise HTTPException(status_code=404, detail="资源不存在。")
-    if write and permission not in {"owner", "manager", "editor"}:
+    if write and session["role"] == "viewer":
         raise HTTPException(status_code=403, detail="当前账号只有查看权限。")
     return row
 
 
 def consume_session_tokens(session: dict[str, Any], amount: int) -> int:
-    """扣除企业共享额度；平台管理员没有租户额度限制。"""
+    """扣除个人工作区额度；平台管理员没有租户额度限制。"""
 
     if session["role"] == "platform_admin" or not session.get("tenant_id"):
         return 0
@@ -474,169 +445,6 @@ def create_admin_user(
     return {"item": user}
 
 
-@app.get("/api/tenant/teams")
-def list_tenant_teams(
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token)
-    return {
-        "items": database.list_user_teams(
-            int(session["admin_id"]),
-            session.get("tenant_id"),
-        )
-    }
-
-
-@app.post("/api/tenant/teams")
-def create_tenant_team(
-    request: TeamRequest,
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token, allow_viewer=False)
-    if not session.get("tenant_id"):
-        raise HTTPException(status_code=422, detail="平台账号不能创建个人问卷组。")
-    try:
-        item = database.create_team(
-            int(session["tenant_id"]),
-            request.name,
-            request.description,
-            int(session["admin_id"]),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    database.log_operation(
-        admin_id=int(session["admin_id"]),
-        action="create_team",
-        target_type="team",
-        target_id=int(item["id"]),
-    )
-    return {"item": item}
-
-
-@app.get("/api/tenant/teams/{team_id}/members")
-def list_team_members(
-    team_id: int,
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token)
-    if session["role"] == "viewer":
-        raise HTTPException(status_code=403, detail="当前账号没有查看组成员的权限。")
-    return {
-        "items": database.list_team_members(team_id, int(session["admin_id"])),
-        "invitations": database.list_team_invitations(team_id, int(session["admin_id"])),
-    }
-
-
-@app.post("/api/tenant/teams/{team_id}/invitations")
-def create_team_invitation(
-    team_id: int,
-    request: TeamInvitationRequest,
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token, allow_viewer=False)
-    try:
-        item = database.create_team_invitation(
-            team_id,
-            int(session["admin_id"]),
-            request.username,
-            request.permission,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    database.log_operation(
-        admin_id=int(session["admin_id"]),
-        action="invite_team_member",
-        target_type="team",
-        target_id=team_id,
-        detail={"username": request.username, "permission": request.permission},
-    )
-    return {"item": item}
-
-
-@app.get("/api/invitations")
-def list_invitations(
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token)
-    return {"items": database.list_user_invitations(int(session["admin_id"]))}
-
-
-@app.post("/api/invitations/{invitation_id}/respond")
-def respond_invitation(
-    invitation_id: int,
-    request: InvitationResponseRequest,
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token, allow_viewer=False)
-    item = database.respond_team_invitation(
-        invitation_id,
-        int(session["admin_id"]),
-        accepted=request.accepted,
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail="邀请不存在、已处理或不属于当前账号。")
-    database.log_operation(
-        admin_id=int(session["admin_id"]),
-        action="respond_team_invitation",
-        target_type="team_invitation",
-        target_id=invitation_id,
-        detail={"accepted": request.accepted},
-    )
-    return {"item": item}
-
-
-@app.get("/api/surveys/{survey_id}/access")
-def list_survey_access(
-    survey_id: int,
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token)
-    row = ensure_survey_access(database.get_survey(survey_id), session)
-    if session["role"] == "platform_admin":
-        return {"items": []}
-    if not database.can_manage_survey_access(
-        survey_id,
-        int(session["admin_id"]),
-        session.get("tenant_id"),
-    ):
-        raise HTTPException(status_code=403, detail="只有问卷创建者或问卷组管理者可以管理访问权限。")
-    return {
-        "items": database.list_survey_permissions(
-            int(row["id"]),
-            int(session["admin_id"]),
-            session.get("tenant_id"),
-        )
-    }
-
-
-@app.post("/api/surveys/{survey_id}/access")
-def update_survey_access(
-    survey_id: int,
-    request: SurveyPermissionRequest,
-    x_admin_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    session = require_admin(x_admin_token, allow_viewer=False)
-    ensure_survey_access(database.get_survey(survey_id), session)
-    try:
-        item = database.set_survey_permission(
-            survey_id,
-            int(session["admin_id"]),
-            request.user_id,
-            request.permission,
-            session.get("tenant_id"),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    database.log_operation(
-        admin_id=int(session["admin_id"]),
-        action="update_survey_access",
-        target_type="survey",
-        target_id=survey_id,
-        detail={"user_id": request.user_id, "permission": request.permission},
-    )
-    return {"item": item}
-
-
 @app.get("/api/billing/overview")
 def get_billing_overview(
     x_admin_token: str | None = Header(default=None),
@@ -682,7 +490,7 @@ def create_billing_request(
 ) -> dict[str, Any]:
     session = require_admin(x_admin_token, allow_viewer=False)
     if not session.get("tenant_id"):
-        raise HTTPException(status_code=422, detail="平台管理员不需要申请企业 Token。")
+        raise HTTPException(status_code=422, detail="平台管理员不需要申请个人工作区 Token。")
     try:
         item = database.create_token_request(
             int(session["tenant_id"]),
@@ -937,16 +745,6 @@ def wrap_survey(
         raise HTTPException(status_code=422, detail=f"问卷数据无效：{exc}") from exc
     if not questions:
         raise HTTPException(status_code=400, detail="没有可包装的问卷题目。")
-    if request.team_id is not None:
-        if not any(
-            int(team["id"]) == request.team_id
-            and team.get("member_role") in {"manager", "editor"}
-            for team in database.list_user_teams(
-                int(session["admin_id"]),
-                session.get("tenant_id"),
-            )
-        ):
-            raise HTTPException(status_code=404, detail="问卷组不存在或当前账号无权使用。")
     token_estimate = _estimate_tokens(request.brand_goal, request.theme_hint, request.questions)
     charged_tokens = consume_session_tokens(session, token_estimate)
     prompt_version = "wrap-v2-quality-control"
@@ -994,7 +792,6 @@ def wrap_survey(
         generation_latency_ms=latency_ms,
         quality_score=quality_score,
         tenant_id=session.get("tenant_id"),
-        team_id=request.team_id,
         created_by=int(session["admin_id"]),
         moderation_status="pending",
     )
@@ -1020,7 +817,6 @@ def wrap_survey(
             "prompt_version": prompt_version,
             "quality_score": quality_score,
             "token_estimate": token_estimate,
-            "team_id": request.team_id,
         },
     )
     saved = database.get_survey(survey_id)

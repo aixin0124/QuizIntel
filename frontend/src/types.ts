@@ -52,8 +52,6 @@ export type SurveySummary = {
   generation_latency_ms?: number | null;
   quality_score?: number | null;
   tenant_id?: number | null;
-  team_id?: number | null;
-  team_name?: string | null;
   moderation_status?: "pending" | "approved" | "rejected" | string;
 };
 
@@ -216,62 +214,12 @@ export type AnalyticsPayload = {
 export type AdminUser = {
   id: number;
   username: string;
-  role: "platform_admin" | "owner" | "tenant_owner" | "survey_admin" | "admin" | "viewer" | "member" | string;
+  role: "platform_admin" | "owner" | "tenant_owner" | "survey_admin" | "admin" | "viewer" | string;
   is_active: boolean;
   created_at: string;
   updated_at: string;
   display_name?: string | null;
   tenant_id?: number | null;
-};
-
-export type Team = {
-  id: number;
-  tenant_id: number;
-  name: string;
-  description?: string | null;
-  created_at: string;
-  created_by?: number | null;
-  member_role?: "manager" | "editor" | "viewer" | string;
-  member_count?: number;
-  survey_count?: number;
-};
-
-export type TeamMember = {
-  id: number;
-  username: string;
-  display_name?: string | null;
-  email?: string | null;
-  is_active: boolean;
-  member_role: "manager" | "editor" | "viewer" | string;
-  status: string;
-  created_at: string;
-  responded_at?: string | null;
-};
-
-export type TeamInvitation = {
-  id: number;
-  team_id: number;
-  team_name?: string;
-  permission: "viewer" | "editor" | string;
-  status: "pending" | "accepted" | "rejected" | string;
-  created_at: string;
-  responded_at?: string | null;
-  invited_by_username?: string | null;
-  invited_by_name?: string | null;
-  invitee_username?: string | null;
-  invitee_name?: string | null;
-};
-
-export type SurveyPermission = {
-  survey_id: number;
-  user_id: number;
-  permission: "viewer" | "editor" | string;
-  username: string;
-  display_name?: string | null;
-  email?: string | null;
-  is_active: boolean;
-  created_at?: string;
-  updated_at?: string;
 };
 
 export type AccountProfile = {

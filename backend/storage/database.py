@@ -86,6 +86,7 @@ class ResearchDatabase:
                 self._init_mysql_schema(connection)
             else:
                 self._init_sqlite_schema(connection)
+            self._remove_collaboration_schema(connection)
             self._ensure_tenant_seed(connection)
             self._ensure_admin_seed(connection)
             self._backfill_tenant_links(connection)
@@ -157,7 +158,6 @@ class ResearchDatabase:
                 generation_latency_ms INTEGER,
                 quality_score REAL,
                 tenant_id INTEGER,
-                team_id INTEGER,
                 created_by INTEGER,
                 moderation_status TEXT NOT NULL DEFAULT 'approved',
                 moderation_note TEXT,
@@ -212,45 +212,6 @@ class ResearchDatabase:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS teams (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT,
-                created_at TEXT NOT NULL,
-                created_by INTEGER,
-                UNIQUE(tenant_id, name)
-            );
-            CREATE TABLE IF NOT EXISTS team_members (
-                team_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'manager',
-                status TEXT NOT NULL DEFAULT 'accepted',
-                invited_by INTEGER,
-                invited_at TEXT,
-                responded_at TEXT,
-                PRIMARY KEY (team_id, user_id)
-            );
-            CREATE TABLE IF NOT EXISTS team_invitations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                team_id INTEGER NOT NULL,
-                invitee_id INTEGER NOT NULL,
-                invited_by INTEGER NOT NULL,
-                permission TEXT NOT NULL DEFAULT 'viewer',
-                status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL,
-                responded_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS survey_permissions (
-                survey_id INTEGER NOT NULL,
-                user_id INTEGER NOT NULL,
-                permission TEXT NOT NULL DEFAULT 'viewer',
-                granted_by INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY (survey_id, user_id)
-            );
             CREATE TABLE IF NOT EXISTS token_requests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant_id INTEGER NOT NULL,
@@ -287,7 +248,6 @@ class ResearchDatabase:
                 "generation_latency_ms": "INTEGER",
                 "quality_score": "REAL",
                 "tenant_id": "INTEGER",
-                "team_id": "INTEGER",
                 "created_by": "INTEGER",
                 "moderation_status": "TEXT NOT NULL DEFAULT 'approved'",
                 "moderation_note": "TEXT",
@@ -328,17 +288,6 @@ class ResearchDatabase:
                 "is_invalid": "INTEGER NOT NULL DEFAULT 0",
                 "invalid_reason": "TEXT",
                 "invalid_at": "TEXT",
-            },
-        )
-        self._ensure_columns(
-            connection,
-            "team_members",
-            {
-                "role": "TEXT NOT NULL DEFAULT 'manager'",
-                "status": "TEXT NOT NULL DEFAULT 'accepted'",
-                "invited_by": "INTEGER",
-                "invited_at": "TEXT",
-                "responded_at": "TEXT",
             },
         )
         connection.execute(
@@ -429,7 +378,6 @@ class ResearchDatabase:
                 generation_latency_ms INT,
                 quality_score DOUBLE,
                 tenant_id INT,
-                team_id INT,
                 created_by INT,
                 moderation_status VARCHAR(32) NOT NULL DEFAULT 'approved',
                 moderation_note VARCHAR(500),
@@ -495,56 +443,6 @@ class ResearchDatabase:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
             """
-            CREATE TABLE IF NOT EXISTS teams (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                tenant_id INT NOT NULL,
-                name VARCHAR(120) NOT NULL,
-                description VARCHAR(500),
-                created_at VARCHAR(32) NOT NULL,
-                created_by INT,
-                UNIQUE KEY idx_teams_tenant_name (tenant_id, name)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS team_members (
-                team_id INT NOT NULL,
-                user_id INT NOT NULL,
-                created_at VARCHAR(32) NOT NULL,
-                role VARCHAR(32) NOT NULL DEFAULT 'manager',
-                status VARCHAR(32) NOT NULL DEFAULT 'accepted',
-                invited_by INT,
-                invited_at VARCHAR(32),
-                responded_at VARCHAR(32),
-                PRIMARY KEY (team_id, user_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS team_invitations (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                team_id INT NOT NULL,
-                invitee_id INT NOT NULL,
-                invited_by INT NOT NULL,
-                permission VARCHAR(32) NOT NULL DEFAULT 'viewer',
-                status VARCHAR(32) NOT NULL DEFAULT 'pending',
-                created_at VARCHAR(32) NOT NULL,
-                responded_at VARCHAR(32),
-                INDEX idx_team_invitations_invitee (invitee_id, status),
-                INDEX idx_team_invitations_team (team_id, status)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            """
-            CREATE TABLE IF NOT EXISTS survey_permissions (
-                survey_id INT NOT NULL,
-                user_id INT NOT NULL,
-                permission VARCHAR(32) NOT NULL DEFAULT 'viewer',
-                granted_by INT NOT NULL,
-                created_at VARCHAR(32) NOT NULL,
-                updated_at VARCHAR(32) NOT NULL,
-                PRIMARY KEY (survey_id, user_id),
-                INDEX idx_survey_permissions_user (user_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """,
-            """
             CREATE TABLE IF NOT EXISTS token_requests (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 tenant_id INT NOT NULL,
@@ -579,7 +477,6 @@ class ResearchDatabase:
                 "generation_latency_ms": "INT",
                 "quality_score": "DOUBLE",
                 "tenant_id": "INT",
-                "team_id": "INT",
                 "created_by": "INT",
                 "moderation_status": "VARCHAR(32) NOT NULL DEFAULT 'approved'",
                 "moderation_note": "VARCHAR(500)",
@@ -622,17 +519,6 @@ class ResearchDatabase:
                 "invalid_at": "VARCHAR(32)",
             },
         )
-        self._ensure_columns(
-            connection,
-            "team_members",
-            {
-                "role": "VARCHAR(32) NOT NULL DEFAULT 'manager'",
-                "status": "VARCHAR(32) NOT NULL DEFAULT 'accepted'",
-                "invited_by": "INT",
-                "invited_at": "VARCHAR(32)",
-                "responded_at": "VARCHAR(32)",
-            },
-        )
         self._execute(connection, "UPDATE wrapped_surveys SET status = 'collecting' WHERE status = 'open'")
         self._execute(connection, "UPDATE wrapped_surveys SET status = 'draft' WHERE status = 'pending'")
         self._execute(connection, "UPDATE wrapped_surveys SET status = 'ended' WHERE status = 'paused'")
@@ -643,6 +529,21 @@ class ResearchDatabase:
         self._execute(
             connection,
             "UPDATE responses SET is_test = 0 WHERE source = 'admin_preview'",
+        )
+
+    def _remove_collaboration_schema(self, connection: Any) -> None:
+        """清理旧版本遗留的协作表和字段。"""
+
+        for table in ("survey_permissions", "team_invitations", "team_members", "teams"):
+            self._execute(connection, f"DROP TABLE IF EXISTS {table}")
+        for table in ("wrapped_surveys", "generation_records"):
+            if "team_id" in self._table_columns(connection, table):
+                self._execute(connection, f"ALTER TABLE {table} DROP COLUMN team_id")
+        self._execute(
+            connection,
+            "INSERT INTO schema_migrations (version, applied_at) "
+            "SELECT 2, ? WHERE NOT EXISTS (SELECT 1 FROM schema_migrations WHERE version = 2)",
+            (self._now(),),
         )
 
     def _ensure_tenant_seed(self, connection: Any) -> None:
@@ -706,47 +607,6 @@ class ResearchDatabase:
             "UPDATE wrapped_surveys SET tenant_id = ? WHERE tenant_id IS NULL",
             (tenant_id,),
         )
-        team = self._fetchone(
-            connection,
-            "SELECT id FROM teams WHERE tenant_id = ? ORDER BY id LIMIT 1",
-            (tenant_id,),
-        )
-        if not team:
-            now = self._now()
-            team_cursor = self._execute(
-                connection,
-                "INSERT INTO teams (tenant_id, name, description, created_at, created_by) "
-                "VALUES (?, ?, ?, ?, (SELECT id FROM admin_users WHERE username = 'aixin'))",
-                (tenant_id, "我的问卷", "历史问卷的默认个人空间。", now),
-            )
-            team_id = int(team_cursor.lastrowid)
-        else:
-            team_id = int(team["id"])
-        self._execute(
-            connection,
-            "UPDATE teams SET name = '我的问卷', description = '个人账号的默认问卷组。' "
-            "WHERE id = ? AND name = '默认问卷组'",
-            (team_id,),
-        )
-        owner = self._fetchone(
-            connection,
-            "SELECT id FROM admin_users WHERE username = 'aixin'",
-        )
-        if owner:
-            self._execute(
-                connection,
-                "UPDATE teams SET created_by = COALESCE(created_by, ?) WHERE id = ?",
-                (owner["id"], team_id),
-            )
-            self._execute(
-                connection,
-                "INSERT INTO team_members "
-                "(team_id, user_id, created_at, role, status, invited_by, invited_at, responded_at) "
-                "SELECT ?, ?, ?, 'manager', 'accepted', ?, ?, ? "
-                "WHERE NOT EXISTS (SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ?)",
-                (team_id, owner["id"], self._now(), owner["id"], self._now(), self._now(), team_id, owner["id"]),
-            )
-
     def _ensure_columns(self, connection: Any, table: str, definitions: dict[str, str]) -> None:
         columns = self._table_columns(connection, table)
         for column, definition in definitions.items():
@@ -772,7 +632,6 @@ class ResearchDatabase:
         generation_latency_ms: int | None = None,
         quality_score: float | None = None,
         tenant_id: int | None = None,
-        team_id: int | None = None,
         created_by: int | None = None,
         moderation_status: str = "approved",
     ) -> int:
@@ -785,8 +644,8 @@ class ResearchDatabase:
                 "INSERT INTO wrapped_surveys "
                 "(survey_name, theme, source, created_at, payload, status, share_token, "
                 "prompt_version, model_name, generation_latency_ms, quality_score, tenant_id, "
-                "team_id, created_by, moderation_status) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "created_by, moderation_status) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     survey.survey_name,
                     survey.theme,
@@ -800,7 +659,6 @@ class ResearchDatabase:
                     generation_latency_ms,
                     quality_score,
                     tenant_id,
-                    team_id,
                     created_by,
                     moderation_status,
                 ),
@@ -1034,12 +892,9 @@ class ResearchDatabase:
                 values.append(tenant_id)
             if user_id is not None:
                 conditions.append(
-                    "(s.created_by = ? OR (s.created_by IS NULL AND s.tenant_id = ?) "
-                    "OR EXISTS (SELECT 1 FROM survey_permissions p WHERE p.survey_id = s.id AND p.user_id = ?) "
-                    "OR EXISTS (SELECT 1 FROM teams manager_team "
-                    "WHERE manager_team.id = s.team_id AND manager_team.created_by = ?))"
+                    "(s.created_by = ? OR (s.created_by IS NULL AND s.tenant_id = ?))"
                 )
-                values.extend([user_id, tenant_id if tenant_id is not None else -1, user_id, user_id])
+                values.extend([user_id, tenant_id if tenant_id is not None else -1])
             if status:
                 conditions.append("s.status = ?")
                 values.append(status)
@@ -1054,10 +909,10 @@ class ResearchDatabase:
                 "SELECT s.id, s.survey_name, s.theme, s.source, s.created_at, s.status, "
                 "s.target_sample_count, s.ended_at, s.deleted_at, "
                 "s.share_token, s.version, s.prompt_version, s.model_name, s.generation_latency_ms, "
-                "s.quality_score, s.tenant_id, s.team_id, s.created_by, s.moderation_status, "
-                "s.moderation_note, s.reviewed_at, t.name AS team_name, "
+                "s.quality_score, s.tenant_id, s.created_by, s.moderation_status, "
+                "s.moderation_note, s.reviewed_at, t.name AS tenant_name, "
                 "(SELECT COUNT(*) FROM responses r WHERE r.survey_id = s.id AND r.is_invalid = 0 AND r.is_test = 0) AS response_count "
-                f"FROM wrapped_surveys s LEFT JOIN teams t ON t.id = s.team_id {where} ORDER BY s.id DESC LIMIT ?",
+                f"FROM wrapped_surveys s LEFT JOIN tenants t ON t.id = s.tenant_id {where} ORDER BY s.id DESC LIMIT ?",
                 tuple(values),
             )
         return rows
@@ -1401,12 +1256,12 @@ class ResearchDatabase:
         display_name: str | None = None,
         email: str | None = None,
     ) -> dict[str, Any]:
-        """创建企业成员账号，保留旧的管理员账号创建接口。"""
+        """创建平台管理的账号，保留旧的后台账号创建接口。"""
 
         username = username.strip()
         if not username:
             raise ValueError("账号不能为空。")
-        if role not in {"admin", "viewer", "survey_admin", "member"}:
+        if role not in {"admin", "viewer", "survey_admin"}:
             raise ValueError("账号角色无效。")
         now = self._now()
         with self._connection() as connection:
@@ -1456,7 +1311,7 @@ class ResearchDatabase:
         company_name: str = "",
         email: str = "",
     ) -> dict[str, Any]:
-        """注册一个个人工作区，并创建默认问卷组。"""
+        """注册一个个人工作区。"""
 
         username = username.strip()
         company_name = " ".join(company_name.split()).strip()
@@ -1502,20 +1357,6 @@ class ResearchDatabase:
                 (username, hash_password(password), tenant_id, username, email, now, now),
             )
             user_id = int(user_cursor.lastrowid)
-            team_cursor = self._execute(
-                connection,
-                "INSERT INTO teams (tenant_id, name, description, created_at, created_by) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (tenant_id, "我的问卷", "个人账号的默认问卷组。", now, user_id),
-            )
-            team_id = int(team_cursor.lastrowid)
-            self._execute(
-                connection,
-                "INSERT INTO team_members "
-                "(team_id, user_id, created_at, role, status, invited_by, invited_at, responded_at) "
-                "VALUES (?, ?, ?, 'manager', 'accepted', ?, ?, ?)",
-                (team_id, user_id, now, user_id, now, now),
-            )
         return {
             "tenant": {
                 "id": tenant_id,
@@ -1539,416 +1380,31 @@ class ResearchDatabase:
                 "name": workspace_name,
                 "token_balance": default_tokens,
             },
-            "team": {"id": team_id, "name": "我的问卷"},
         }
 
     def get_tenant(self, tenant_id: int) -> dict[str, Any] | None:
         with self._connection() as connection:
             return self._fetchone(connection, "SELECT * FROM tenants WHERE id = ?", (tenant_id,))
 
-    def list_teams(self, tenant_id: int) -> list[dict[str, Any]]:
-        with self._connection() as connection:
-            return self._fetchall(
-                connection,
-                "SELECT t.id, t.tenant_id, t.name, t.description, t.created_at, "
-                "(SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count, "
-                "(SELECT COUNT(*) FROM wrapped_surveys s WHERE s.team_id = t.id AND s.deleted_at IS NULL) AS survey_count "
-                "FROM teams t WHERE t.tenant_id = ? ORDER BY t.id",
-                (tenant_id,),
-            )
-
-    def list_user_teams(self, user_id: int, tenant_id: int | None = None) -> list[dict[str, Any]]:
-        """读取当前账号创建或已接受加入的问卷组。"""
-
-        conditions = ["(t.created_by = ? OR tm.user_id IS NOT NULL)"]
-        query_values: list[Any] = [user_id]
-        with self._connection() as connection:
-            return self._fetchall(
-                connection,
-                "SELECT t.id, t.tenant_id, t.name, t.description, t.created_at, t.created_by, "
-                "CASE WHEN t.created_by = ? THEN 'manager' ELSE COALESCE(tm.role, 'viewer') END AS member_role, "
-                "(SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id AND m.status = 'accepted') AS member_count, "
-                "(SELECT COUNT(*) FROM wrapped_surveys s WHERE s.team_id = t.id AND s.deleted_at IS NULL) AS survey_count "
-                "FROM teams t "
-                "LEFT JOIN team_members tm ON tm.team_id = t.id AND tm.user_id = ? AND tm.status = 'accepted' "
-                f"WHERE {' AND '.join(conditions)} ORDER BY t.id DESC",
-                tuple([user_id, user_id] + query_values),
-            )
-
-    def create_team(
-        self,
-        tenant_id: int,
-        name: str,
-        description: str,
-        created_by: int,
-    ) -> dict[str, Any]:
-        name = " ".join(name.split()).strip()
-        if not name:
-            raise ValueError("问卷组名称不能为空。")
-        if len(name) > 120:
-            raise ValueError("问卷组名称不能超过 120 个字符。")
-        now = self._now()
-        with self._connection() as connection:
-            exists = self._fetchone(
-                connection,
-                "SELECT id FROM teams WHERE tenant_id = ? AND name = ?",
-                (tenant_id, name),
-            )
-            if exists:
-                raise ValueError("同一企业下不能创建同名问卷组。")
-            cursor = self._execute(
-                connection,
-                "INSERT INTO teams (tenant_id, name, description, created_at, created_by) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (tenant_id, name, description.strip()[:500], now, created_by),
-            )
-            team_id = int(cursor.lastrowid)
-            self._execute(
-                connection,
-                "INSERT INTO team_members "
-                "(team_id, user_id, created_at, role, status, invited_by, invited_at, responded_at) "
-                "VALUES (?, ?, ?, 'manager', 'accepted', ?, ?, ?)",
-                (team_id, created_by, now, created_by, now, now),
-            )
-        return {
-            "id": team_id,
-            "tenant_id": tenant_id,
-            "name": name,
-            "description": description.strip()[:500],
-            "created_at": now,
-            "created_by": created_by,
-            "member_role": "manager",
-            "member_count": 1,
-            "survey_count": 0,
-        }
-
-    def get_team_role(self, team_id: int, user_id: int) -> str | None:
-        with self._connection() as connection:
-            team = self._fetchone(
-                connection,
-                "SELECT created_by FROM teams WHERE id = ?",
-                (team_id,),
-            )
-            if not team:
-                return None
-            if int(team["created_by"] or 0) == user_id:
-                return "manager"
-            member = self._fetchone(
-                connection,
-                "SELECT role FROM team_members "
-                "WHERE team_id = ? AND user_id = ? AND status = 'accepted'",
-                (team_id, user_id),
-            )
-        return str(member["role"]) if member else None
-
-    def list_team_members(self, team_id: int, owner_id: int) -> list[dict[str, Any]]:
-        with self._connection() as connection:
-            team = self._fetchone(
-                connection,
-                "SELECT id FROM teams WHERE id = ? AND created_by = ?",
-                (team_id, owner_id),
-            )
-            if not team:
-                return []
-            return self._fetchall(
-                connection,
-                "SELECT u.id, u.username, u.display_name, u.email, u.is_active, "
-                "m.role AS member_role, m.status, m.created_at, m.responded_at "
-                "FROM team_members m JOIN admin_users u ON u.id = m.user_id "
-                "WHERE m.team_id = ? AND m.status = 'accepted' ORDER BY "
-                "CASE WHEN m.role = 'manager' THEN 0 ELSE 1 END, m.created_at",
-                (team_id,),
-            )
-
-    def list_team_invitations(self, team_id: int, owner_id: int) -> list[dict[str, Any]]:
-        with self._connection() as connection:
-            team = self._fetchone(
-                connection,
-                "SELECT id FROM teams WHERE id = ? AND created_by = ?",
-                (team_id, owner_id),
-            )
-            if not team:
-                return []
-            return self._fetchall(
-                connection,
-                "SELECT i.id, i.team_id, i.invitee_id, i.permission, i.status, i.created_at, "
-                "i.responded_at, u.username AS invitee_username, u.display_name AS invitee_name "
-                "FROM team_invitations i JOIN admin_users u ON u.id = i.invitee_id "
-                "WHERE i.team_id = ? ORDER BY CASE WHEN i.status = 'pending' THEN 0 ELSE 1 END, i.id DESC",
-                (team_id,),
-            )
-
-    def create_team_invitation(
-        self,
-        team_id: int,
-        inviter_id: int,
-        invitee_username: str,
-        permission: str,
-    ) -> dict[str, Any]:
-        permission = permission.strip().lower()
-        if permission not in {"viewer", "editor"}:
-            raise ValueError("成员权限只能是 viewer 或 editor。")
-        invitee_username = invitee_username.strip()
-        if not invitee_username:
-            raise ValueError("请输入已注册用户的账号或邮箱。")
-        now = self._now()
-        with self._connection() as connection:
-            team = self._fetchone(
-                connection,
-                "SELECT id, name FROM teams WHERE id = ? AND created_by = ?",
-                (team_id, inviter_id),
-            )
-            if not team:
-                raise ValueError("只有问卷组创建者可以邀请成员。")
-            invitee = self._fetchone(
-                connection,
-                "SELECT id, username, display_name, email FROM admin_users "
-                "WHERE is_active = 1 AND (username = ? OR email = ?)",
-                (invitee_username, invitee_username),
-            )
-            if not invitee:
-                raise ValueError("只能邀请已经注册且处于启用状态的用户。")
-            if int(invitee["id"]) == inviter_id:
-                raise ValueError("不能邀请自己加入问卷组。")
-            member = self._fetchone(
-                connection,
-                "SELECT status FROM team_members WHERE team_id = ? AND user_id = ?",
-                (team_id, invitee["id"]),
-            )
-            if member and member["status"] == "accepted":
-                raise ValueError("该用户已经是问卷组成员。")
-            pending = self._fetchone(
-                connection,
-                "SELECT id FROM team_invitations "
-                "WHERE team_id = ? AND invitee_id = ? AND status = 'pending'",
-                (team_id, invitee["id"]),
-            )
-            if pending:
-                raise ValueError("该用户已有一条待处理邀请。")
-            cursor = self._execute(
-                connection,
-                "INSERT INTO team_invitations "
-                "(team_id, invitee_id, invited_by, permission, status, created_at) "
-                "VALUES (?, ?, ?, ?, 'pending', ?)",
-                (team_id, invitee["id"], inviter_id, permission, now),
-            )
-            invitation_id = int(cursor.lastrowid)
-        return {
-            "id": invitation_id,
-            "team_id": team_id,
-            "team_name": team["name"],
-            "invitee_id": int(invitee["id"]),
-            "invitee_username": invitee["username"],
-            "invitee_name": invitee.get("display_name") or invitee["username"],
-            "permission": permission,
-            "status": "pending",
-            "created_at": now,
-        }
-
-    def list_user_invitations(self, user_id: int) -> list[dict[str, Any]]:
-        with self._connection() as connection:
-            return self._fetchall(
-                connection,
-                "SELECT i.id, i.team_id, i.permission, i.status, i.created_at, i.responded_at, "
-                "t.name AS team_name, inviter.username AS invited_by_username, "
-                "inviter.display_name AS invited_by_name "
-                "FROM team_invitations i JOIN teams t ON t.id = i.team_id "
-                "LEFT JOIN admin_users inviter ON inviter.id = i.invited_by "
-                "WHERE i.invitee_id = ? ORDER BY CASE WHEN i.status = 'pending' THEN 0 ELSE 1 END, i.id DESC",
-                (user_id,),
-            )
-
-    def respond_team_invitation(
-        self,
-        invitation_id: int,
-        user_id: int,
-        *,
-        accepted: bool,
-    ) -> dict[str, Any] | None:
-        now = self._now()
-        with self._connection() as connection:
-            invitation = self._fetchone(
-                connection,
-                "SELECT * FROM team_invitations "
-                "WHERE id = ? AND invitee_id = ? AND status = 'pending'",
-                (invitation_id, user_id),
-            )
-            if not invitation:
-                return None
-            status = "accepted" if accepted else "rejected"
-            self._execute(
-                connection,
-                "UPDATE team_invitations SET status = ?, responded_at = ? WHERE id = ?",
-                (status, now, invitation_id),
-            )
-            if accepted:
-                member = self._fetchone(
-                    connection,
-                    "SELECT team_id FROM team_members WHERE team_id = ? AND user_id = ?",
-                    (invitation["team_id"], user_id),
-                )
-                if member:
-                    self._execute(
-                        connection,
-                        "UPDATE team_members SET role = ?, status = 'accepted', invited_by = ?, "
-                        "invited_at = ?, responded_at = ? WHERE team_id = ? AND user_id = ?",
-                        (
-                            invitation["permission"],
-                            invitation["invited_by"],
-                            invitation["created_at"],
-                            now,
-                            now,
-                            invitation["team_id"],
-                            user_id,
-                        ),
-                    )
-                else:
-                    self._execute(
-                        connection,
-                        "INSERT INTO team_members "
-                        "(team_id, user_id, created_at, role, status, invited_by, invited_at, responded_at) "
-                        "VALUES (?, ?, ?, ?, 'accepted', ?, ?, ?)",
-                        (
-                            invitation["team_id"],
-                            user_id,
-                            now,
-                            invitation["permission"],
-                            invitation["invited_by"],
-                            invitation["created_at"],
-                            now,
-                        ),
-                    )
-            return self._fetchone(
-                connection,
-                "SELECT i.id, i.team_id, i.permission, i.status, i.created_at, i.responded_at, "
-                "t.name AS team_name FROM team_invitations i JOIN teams t ON t.id = i.team_id "
-                "WHERE i.id = ?",
-                (invitation_id,),
-            )
-
-    def get_survey_permission(
-        self,
-        survey_id: int,
-        user_id: int,
-        tenant_id: int | None = None,
-    ) -> str | None:
-        with self._connection() as connection:
-            survey = self._fetchone(
-                connection,
-                "SELECT created_by, tenant_id, team_id FROM wrapped_surveys WHERE id = ?",
-                (survey_id,),
-            )
-            if not survey:
-                return None
-            if int(survey["created_by"] or 0) == user_id:
-                return "owner"
-            if survey["created_by"] is None and tenant_id is not None and survey["tenant_id"] == tenant_id:
-                return "owner"
-            if survey["team_id"]:
-                team = self._fetchone(
-                    connection,
-                    "SELECT created_by FROM teams WHERE id = ?",
-                    (survey["team_id"],),
-                )
-                if team and int(team["created_by"] or 0) == user_id:
-                    return "manager"
-            permission = self._fetchone(
-                connection,
-                "SELECT permission FROM survey_permissions WHERE survey_id = ? AND user_id = ?",
-                (survey_id, user_id),
-            )
-        return str(permission["permission"]) if permission else None
-
-    def can_manage_survey_access(
+    def can_manage_survey(
         self,
         survey_id: int,
         user_id: int,
         tenant_id: int | None = None,
     ) -> bool:
-        return self.get_survey_permission(survey_id, user_id, tenant_id) in {"owner", "manager"}
+        """确认问卷属于当前账号的个人工作区。"""
 
-    def list_survey_permissions(
-        self,
-        survey_id: int,
-        owner_id: int,
-        tenant_id: int | None = None,
-    ) -> list[dict[str, Any]]:
-        if not self.can_manage_survey_access(survey_id, owner_id, tenant_id):
-            return []
         with self._connection() as connection:
-            return self._fetchall(
+            survey = self._fetchone(
                 connection,
-                "SELECT p.survey_id, p.user_id, p.permission, p.created_at, p.updated_at, "
-                "u.username, u.display_name, u.email, u.is_active "
-                "FROM survey_permissions p JOIN admin_users u ON u.id = p.user_id "
-                "WHERE p.survey_id = ? ORDER BY p.user_id",
+                "SELECT created_by, tenant_id FROM wrapped_surveys WHERE id = ?",
                 (survey_id,),
             )
-
-    def set_survey_permission(
-        self,
-        survey_id: int,
-        owner_id: int,
-        target_user_id: int,
-        permission: str | None,
-        tenant_id: int | None = None,
-    ) -> dict[str, Any] | None:
-        if not self.can_manage_survey_access(survey_id, owner_id, tenant_id):
-            raise ValueError("只有问卷创建者或问卷组管理者可以调整访问权限。")
-        if target_user_id == owner_id:
-            raise ValueError("问卷创建者不需要额外设置访问权限。")
-        if permission not in {None, "viewer", "editor"}:
-            raise ValueError("问卷权限只能是 viewer 或 editor。")
-        now = self._now()
-        with self._connection() as connection:
-            user = self._fetchone(
-                connection,
-                "SELECT id, username, display_name, email FROM admin_users WHERE id = ? AND is_active = 1",
-                (target_user_id,),
-            )
-            if not user:
-                raise ValueError("被授权用户不存在或已停用。")
-            current = self._fetchone(
-                connection,
-                "SELECT survey_id FROM survey_permissions WHERE survey_id = ? AND user_id = ?",
-                (survey_id, target_user_id),
-            )
-            if permission is None:
-                if current:
-                    self._execute(
-                        connection,
-                        "DELETE FROM survey_permissions WHERE survey_id = ? AND user_id = ?",
-                        (survey_id, target_user_id),
-                    )
-                return {
-                    "survey_id": survey_id,
-                    "user_id": target_user_id,
-                    "permission": None,
-                    "username": user["username"],
-                    "display_name": user.get("display_name") or user["username"],
-                }
-            if current:
-                self._execute(
-                    connection,
-                    "UPDATE survey_permissions SET permission = ?, granted_by = ?, updated_at = ? "
-                    "WHERE survey_id = ? AND user_id = ?",
-                    (permission, owner_id, now, survey_id, target_user_id),
-                )
-            else:
-                self._execute(
-                    connection,
-                    "INSERT INTO survey_permissions "
-                    "(survey_id, user_id, permission, granted_by, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (survey_id, target_user_id, permission, owner_id, now, now),
-                )
-        return {
-            "survey_id": survey_id,
-            "user_id": target_user_id,
-            "permission": permission,
-            "username": user["username"],
-            "display_name": user.get("display_name") or user["username"],
-        }
+        if not survey:
+            return False
+        if survey["created_by"] is not None:
+            return int(survey["created_by"]) == user_id
+        return tenant_id is not None and survey["tenant_id"] == tenant_id
 
     def get_billing_overview(self, tenant_id: int, user_id: int | None = None) -> dict[str, Any]:
         with self._connection() as connection:
@@ -2314,82 +1770,15 @@ class ResearchDatabase:
             return
         for table, column in (
             ("wrapped_surveys", "created_by"),
-            ("teams", "created_by"),
             ("operation_logs", "admin_id"),
             ("token_requests", "requested_by"),
             ("token_requests", "reviewed_by"),
-            ("team_invitations", "invitee_id"),
-            ("team_invitations", "invited_by"),
-            ("team_members", "invited_by"),
-            ("survey_permissions", "granted_by"),
         ):
             self._execute(
                 connection,
                 f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
                 (target_id, source_id),
             )
-
-        memberships = self._fetchall(
-            connection,
-            "SELECT team_id FROM team_members WHERE user_id = ?",
-            (source_id,),
-        )
-        for membership in memberships:
-            team_id = int(membership["team_id"])
-            existing = self._fetchone(
-                connection,
-                "SELECT team_id FROM team_members WHERE team_id = ? AND user_id = ?",
-                (team_id, target_id),
-            )
-            if existing:
-                self._execute(
-                    connection,
-                    "DELETE FROM team_members WHERE team_id = ? AND user_id = ?",
-                    (team_id, source_id),
-                )
-            else:
-                self._execute(
-                    connection,
-                    "UPDATE team_members SET user_id = ? WHERE team_id = ? AND user_id = ?",
-                    (target_id, team_id, source_id),
-                )
-
-        permissions = self._fetchall(
-            connection,
-            "SELECT survey_id, permission FROM survey_permissions WHERE user_id = ?",
-            (source_id,),
-        )
-        for permission_row in permissions:
-            survey_id = int(permission_row["survey_id"])
-            existing = self._fetchone(
-                connection,
-                "SELECT permission FROM survey_permissions WHERE survey_id = ? AND user_id = ?",
-                (survey_id, target_id),
-            )
-            if existing:
-                permission = (
-                    "editor"
-                    if permission_row["permission"] == "editor"
-                    or existing["permission"] == "editor"
-                    else "viewer"
-                )
-                self._execute(
-                    connection,
-                    "UPDATE survey_permissions SET permission = ?, updated_at = ? "
-                    "WHERE survey_id = ? AND user_id = ?",
-                    (permission, self._now(), survey_id, target_id),
-                )
-                self._execute(
-                    connection,
-                    "DELETE FROM survey_permissions WHERE survey_id = ? AND user_id = ?",
-                    (survey_id, source_id),
-                )
-            else:
-                self._execute(
-                    connection,
-                    "UPDATE survey_permissions SET user_id = ? WHERE survey_id = ? AND user_id = ?",
-                    (target_id, survey_id, source_id),
-                )
 
     def _ensure_admin_seed(self, connection: Any) -> None:
         """确保演示账号为 aixin，并把历史 admin 账号平滑迁移过来。"""

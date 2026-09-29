@@ -160,7 +160,6 @@ function platformRoleLabel(role: string) {
     owner: "个人账号所有者",
     tenant_owner: "个人账号所有者",
     survey_admin: "个人账号所有者",
-    member: "组内成员",
     viewer: "兼容只读账号",
     admin: "个人账号所有者",
   } as Record<string, string>)[role] || role;

@@ -10,7 +10,6 @@ export function roleLabel(role: string) {
     survey_admin: "个人账号所有者",
     admin: "个人账号所有者",
     viewer: "兼容只读账号",
-    member: "组内成员",
   };
   return labels[role] || role;
 }
