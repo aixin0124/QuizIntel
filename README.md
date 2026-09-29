@@ -207,12 +207,12 @@ cd /d "D:\desktop\毕业\趣测智研"
 mysql -uroot -p10124 --default-character-set=utf8mb4 < backend\storage\init_mysql.sql
 ```
 
-安装新依赖后迁移旧 SQLite 数据：
+<!-- 安装新依赖后迁移旧 SQLite 数据：
 
 ```bat
 .\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 .\.venv\Scripts\python.exe -m backend.storage.migrate_sqlite_to_mysql --sqlite data\fun_research.db --mysql "mysql+pymysql://root:10124@127.0.0.1:3306/fun_research?charset=utf8mb4"
-```
+``` -->
 
 表结构说明见 `backend/storage/SCHEMA.md`。迁移脚本会直接把 SQLite 历史问卷和答卷插入 MySQL，不把业务数据写入初始化 SQL。
 
