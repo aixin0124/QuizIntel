@@ -312,6 +312,27 @@ export type PlatformUser = {
   updated_at: string;
 };
 
+export type UserNotification = {
+  id: number;
+  notification_type: string;
+  title: string;
+  content: string;
+  survey_id?: number | null;
+  created_at: string;
+};
+
+export type Announcement = {
+  id: number;
+  title: string;
+  content: string;
+  status: "draft" | "published" | "archived" | string;
+  published_at?: string | null;
+  created_by?: number | null;
+  created_at: string;
+  updated_at: string;
+  is_read?: boolean | number;
+};
+
 export type GenerationStep = {
   title: string;
   detail: string;

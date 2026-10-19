@@ -151,6 +151,14 @@ class PlatformUserStatusRequest(BaseModel):
     is_active: bool
 
 
+class AnnouncementRequest(BaseModel):
+    """平台公告创建和更新请求。"""
+
+    title: str
+    content: str
+    status: str = "draft"
+
+
 class ChangePasswordRequest(BaseModel):
     """管理员修改密码请求。"""
 
@@ -217,6 +225,9 @@ def get_headlines() -> Any:
 
 @app.post("/api/admin/login")
 def admin_login(request: AdminLoginRequest, raw_request: Request) -> dict[str, Any]:
+    account = database.get_user_account(request.username)
+    if account and not account["is_active"]:
+        raise HTTPException(status_code=403, detail="该账号已冻结，请联系管理员取消冻结。")
     login = database.authenticate_admin(
         request.username,
         request.password,
@@ -248,6 +259,9 @@ def auth_login(request: AdminLoginRequest, raw_request: Request) -> dict[str, An
 def platform_auth_login(request: AdminLoginRequest, raw_request: Request) -> dict[str, Any]:
     """平台超级管理员独立登录入口。"""
 
+    account = database.get_user_account(request.username)
+    if account and not account["is_active"]:
+        raise HTTPException(status_code=403, detail="该账号已冻结，请联系管理员取消冻结。")
     login = database.authenticate_admin(
         request.username,
         request.password,
@@ -543,6 +557,11 @@ def update_platform_user_status(
     session = require_platform_admin(x_admin_token)
     if user_id == int(session["admin_id"]) and not request.is_active:
         raise HTTPException(status_code=422, detail="不能停用当前平台管理员账号。")
+    target = database.get_user_account_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在。")
+    if target["role"] == "platform_admin":
+        raise HTTPException(status_code=422, detail="不能冻结平台超级管理员账号。")
     item = database.update_user_status(user_id, request.is_active)
     if not item:
         raise HTTPException(status_code=404, detail="用户不存在。")
@@ -564,6 +583,18 @@ def list_platform_reviews(
     return {"items": database.list_platform_reviews()}
 
 
+@app.get("/api/platform/reviews/{survey_id}")
+def get_platform_review_detail(
+    survey_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    item = database.get_platform_review_detail(survey_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="问卷不存在。")
+    return {"item": item}
+
+
 @app.post("/api/platform/reviews/{survey_id}")
 def review_platform_survey(
     survey_id: int,
@@ -571,6 +602,8 @@ def review_platform_survey(
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
     session = require_platform_admin(x_admin_token)
+    if not request.approved and not request.note.strip():
+        raise HTTPException(status_code=422, detail="退回问卷时必须填写退回原因。")
     item = database.review_survey(
         survey_id,
         int(session["admin_id"]),
@@ -585,6 +618,126 @@ def review_platform_survey(
         target_type="survey",
         target_id=survey_id,
         detail={"approved": request.approved, "note": request.note},
+    )
+    return {"item": item}
+
+
+@app.get("/api/notifications/unread")
+def list_unread_notifications(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    return {"items": database.list_unread_notifications(int(session["admin_id"]))}
+
+
+@app.post("/api/notifications/read-all")
+def mark_all_notifications_read(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    return {"updated": database.mark_all_notifications_read(int(session["admin_id"]))}
+
+
+@app.post("/api/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token)
+    if not database.mark_notification_read(notification_id, int(session["admin_id"])):
+        raise HTTPException(status_code=404, detail="通知不存在。")
+    return {"message": "通知已读。"}
+
+
+@app.get("/api/announcements")
+def list_announcements(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    user_id: int | None = None
+    if x_admin_token:
+        session = database.get_admin_session(x_admin_token)
+        if session:
+            user_id = int(session["admin_id"])
+    return {"items": database.list_announcements(user_id=user_id)}
+
+
+@app.post("/api/announcements/read-all")
+def mark_all_announcements_read(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token, allow_platform=True)
+    return {"updated": database.mark_all_announcements_read(int(session["admin_id"]))}
+
+
+@app.post("/api/announcements/{announcement_id}/read")
+def mark_announcement_read(
+    announcement_id: int,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_admin(x_admin_token, allow_platform=True)
+    if not database.mark_announcement_read(announcement_id, int(session["admin_id"])):
+        raise HTTPException(status_code=404, detail="公告不存在。")
+    return {"message": "公告已读。"}
+
+
+@app.get("/api/platform/announcements")
+def list_platform_announcements(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_platform_admin(x_admin_token)
+    return {"items": database.list_announcements(include_unpublished=True)}
+
+
+@app.post("/api/platform/announcements")
+def create_platform_announcement(
+    request: AnnouncementRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_platform_admin(x_admin_token)
+    try:
+        item = database.create_announcement(
+            request.title,
+            request.content,
+            int(session["admin_id"]),
+            request.status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="create_announcement",
+        target_type="announcement",
+        target_id=int(item["id"]),
+        detail={"status": item["status"]},
+    )
+    return {"item": item}
+
+
+@app.post("/api/platform/announcements/{announcement_id}")
+def update_platform_announcement(
+    announcement_id: int,
+    request: AnnouncementRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, Any]:
+    session = require_platform_admin(x_admin_token)
+    try:
+        item = database.update_announcement(
+            announcement_id,
+            request.title,
+            request.content,
+            request.status,
+            int(session["admin_id"]),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not item:
+        raise HTTPException(status_code=404, detail="公告不存在。")
+    database.log_operation(
+        admin_id=int(session["admin_id"]),
+        action="update_announcement",
+        target_type="announcement",
+        target_id=announcement_id,
+        detail={"status": item["status"]},
     )
     return {"item": item}
 

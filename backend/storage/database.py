@@ -228,8 +228,36 @@ class ResearchDatabase:
                 setting_value TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS user_notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                notification_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                survey_id INTEGER,
+                read_at TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS announcements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                published_at TEXT,
+                created_by INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS announcement_reads (
+                announcement_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                read_at TEXT NOT NULL,
+                PRIMARY KEY (announcement_id, user_id)
+            );
             CREATE INDEX IF NOT EXISTS idx_responses_survey_id ON responses(survey_id);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_wrapped_surveys_share_token ON wrapped_surveys(share_token);
+            CREATE INDEX IF NOT EXISTS idx_user_notifications_unread ON user_notifications(user_id, read_at);
+            CREATE INDEX IF NOT EXISTS idx_announcements_status ON announcements(status, published_at);
             """
         )
         self._ensure_columns(
@@ -461,6 +489,40 @@ class ResearchDatabase:
                 setting_key VARCHAR(120) PRIMARY KEY,
                 setting_value TEXT NOT NULL,
                 updated_at VARCHAR(32) NOT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_notifications (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                notification_type VARCHAR(64) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                content TEXT NOT NULL,
+                survey_id INT,
+                read_at VARCHAR(32),
+                created_at VARCHAR(32) NOT NULL,
+                INDEX idx_user_notifications_unread (user_id, read_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS announcements (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                title VARCHAR(255) NOT NULL,
+                content TEXT NOT NULL,
+                status VARCHAR(32) NOT NULL DEFAULT 'draft',
+                published_at VARCHAR(32),
+                created_by INT NOT NULL,
+                created_at VARCHAR(32) NOT NULL,
+                updated_at VARCHAR(32) NOT NULL,
+                INDEX idx_announcements_status (status, published_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS announcement_reads (
+                announcement_id INT NOT NULL,
+                user_id INT NOT NULL,
+                read_at VARCHAR(32) NOT NULL,
+                PRIMARY KEY (announcement_id, user_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """,
         ]
@@ -1121,6 +1183,171 @@ class ResearchDatabase:
                 (survey_id,),
             )
 
+    def get_user_account(self, username: str) -> dict[str, Any] | None:
+        """读取登录账号状态，用于区分冻结账号和错误密码。"""
+
+        username = username.strip()
+        if not username:
+            return None
+        with self._connection() as connection:
+            return self._fetchone(
+                connection,
+                "SELECT id, username, role, is_active, tenant_id FROM admin_users WHERE username = ?",
+                (username,),
+            )
+
+    def get_user_account_by_id(self, user_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            return self._fetchone(
+                connection,
+                "SELECT id, username, role, is_active, tenant_id FROM admin_users WHERE id = ?",
+                (user_id,),
+            )
+
+    def list_unread_notifications(self, user_id: int) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            return self._fetchall(
+                connection,
+                "SELECT id, notification_type, title, content, survey_id, created_at "
+                "FROM user_notifications WHERE user_id = ? AND read_at IS NULL ORDER BY id DESC LIMIT 50",
+                (user_id,),
+            )
+
+    def mark_notification_read(self, notification_id: int, user_id: int) -> bool:
+        with self._connection() as connection:
+            cursor = self._execute(
+                connection,
+                "UPDATE user_notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL",
+                (self._now(), notification_id, user_id),
+            )
+            return bool(cursor.rowcount)
+
+    def mark_all_notifications_read(self, user_id: int) -> int:
+        with self._connection() as connection:
+            cursor = self._execute(
+                connection,
+                "UPDATE user_notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL",
+                (self._now(), user_id),
+            )
+            return int(cursor.rowcount or 0)
+
+    def _validate_announcement(self, title: str, content: str, status: str) -> tuple[str, str, str]:
+        title = " ".join(title.split()).strip()
+        content = content.strip()
+        if not title:
+            raise ValueError("公告标题不能为空。")
+        if not content:
+            raise ValueError("公告内容不能为空。")
+        if len(title) > 120:
+            raise ValueError("公告标题不能超过 120 个字符。")
+        if len(content) > 5000:
+            raise ValueError("公告内容不能超过 5000 个字符。")
+        if status not in {"draft", "published", "archived"}:
+            raise ValueError("公告状态无效。")
+        return title, content, status
+
+    def list_announcements(
+        self,
+        *,
+        user_id: int | None = None,
+        include_unpublished: bool = False,
+    ) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            conditions = [] if include_unpublished else ["a.status = 'published'"]
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            params: tuple[Any, ...] = ()
+            if user_id is None:
+                read_sql = "0"
+            else:
+                read_sql = "CASE WHEN ar.announcement_id IS NULL THEN 0 ELSE 1 END"
+            return self._fetchall(
+                connection,
+                "SELECT a.id, a.title, a.content, a.status, a.published_at, a.created_by, "
+                "a.created_at, a.updated_at, "
+                f"{read_sql} AS is_read FROM announcements a "
+                "LEFT JOIN announcement_reads ar ON ar.announcement_id = a.id AND ar.user_id = ? "
+                f"{where} ORDER BY COALESCE(a.published_at, a.created_at) DESC, a.id DESC",
+                (user_id,) + params,
+            )
+
+    def create_announcement(self, title: str, content: str, created_by: int, status: str = "draft") -> dict[str, Any]:
+        title, content, status = self._validate_announcement(title, content, status)
+        now = self._now()
+        published_at = now if status == "published" else None
+        with self._connection() as connection:
+            cursor = self._execute(
+                connection,
+                "INSERT INTO announcements "
+                "(title, content, status, published_at, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (title, content, status, published_at, created_by, now, now),
+            )
+            announcement_id = int(cursor.lastrowid)
+        return self.get_announcement(announcement_id) or {}
+
+    def get_announcement(self, announcement_id: int) -> dict[str, Any] | None:
+        with self._connection() as connection:
+            return self._fetchone(connection, "SELECT * FROM announcements WHERE id = ?", (announcement_id,))
+
+    def update_announcement(
+        self,
+        announcement_id: int,
+        title: str,
+        content: str,
+        status: str,
+        updated_by: int,
+    ) -> dict[str, Any] | None:
+        title, content, status = self._validate_announcement(title, content, status)
+        now = self._now()
+        with self._connection() as connection:
+            existing = self._fetchone(connection, "SELECT id, published_at FROM announcements WHERE id = ?", (announcement_id,))
+            if not existing:
+                return None
+            published_at = existing.get("published_at")
+            if status == "published" and not published_at:
+                published_at = now
+            if status != "published":
+                published_at = None
+            self._execute(
+                connection,
+                "UPDATE announcements SET title = ?, content = ?, status = ?, published_at = ?, updated_at = ? WHERE id = ?",
+                (title, content, status, published_at, now, announcement_id),
+            )
+        return self.get_announcement(announcement_id)
+
+    def mark_announcement_read(self, announcement_id: int, user_id: int) -> bool:
+        with self._connection() as connection:
+            exists = self._fetchone(
+                connection,
+                "SELECT id FROM announcements WHERE id = ? AND status = 'published'",
+                (announcement_id,),
+            )
+            if not exists:
+                return False
+            now = self._now()
+            if self.engine == "mysql":
+                self._execute(
+                    connection,
+                    "INSERT INTO announcement_reads (announcement_id, user_id, read_at) VALUES (?, ?, ?) "
+                    "ON DUPLICATE KEY UPDATE read_at = VALUES(read_at)",
+                    (announcement_id, user_id, now),
+                )
+            else:
+                self._execute(
+                    connection,
+                    "INSERT INTO announcement_reads (announcement_id, user_id, read_at) VALUES (?, ?, ?) "
+                    "ON CONFLICT(announcement_id, user_id) DO UPDATE SET read_at = excluded.read_at",
+                    (announcement_id, user_id, now),
+                )
+            return True
+
+    def mark_all_announcements_read(self, user_id: int) -> int:
+        announcements = self.list_announcements(user_id=user_id)
+        count = 0
+        for item in announcements:
+            if not item.get("is_read") and self.mark_announcement_read(int(item["id"]), user_id):
+                count += 1
+        return count
+
     def authenticate_admin(
         self,
         username: str,
@@ -1676,11 +1903,16 @@ class ResearchDatabase:
 
     def update_user_status(self, user_id: int, is_active: bool) -> dict[str, Any] | None:
         with self._connection() as connection:
+            target = self._fetchone(connection, "SELECT id, role FROM admin_users WHERE id = ?", (user_id,))
+            if not target:
+                return None
             self._execute(
                 connection,
                 "UPDATE admin_users SET is_active = ?, updated_at = ? WHERE id = ?",
                 (1 if is_active else 0, self._now(), user_id),
             )
+            if not is_active:
+                self._execute(connection, "DELETE FROM admin_sessions WHERE admin_id = ?", (user_id,))
             return self._fetchone(
                 connection,
                 "SELECT u.id, u.username, u.display_name, u.email, u.role, u.is_active, "
@@ -1704,6 +1936,37 @@ class ResearchDatabase:
                 "LIMIT 100",
             )
 
+    def get_platform_review_detail(self, survey_id: int) -> dict[str, Any] | None:
+        """读取平台审核所需的题目内容，过滤内部评分字段。"""
+
+        row = self.get_survey(survey_id)
+        if not row or row.get("deleted_at"):
+            return None
+        payload = row.get("payload") or {}
+        questions = []
+        for index, question in enumerate(payload.get("questions", []), start=1):
+            questions.append(
+                {
+                    "index": index,
+                    "question_id": question.get("question_id", ""),
+                    "public_text": question.get("public_text", ""),
+                    "source_text": question.get("source_text", ""),
+                    "question_type": question.get("question_type", ""),
+                    "options": question.get("options", []),
+                    "required": bool(question.get("required", True)),
+                }
+            )
+        return {
+            "id": row["id"],
+            "survey_name": row["survey_name"],
+            "theme": row["theme"],
+            "status": row["status"],
+            "moderation_status": row["moderation_status"],
+            "moderation_note": row.get("moderation_note"),
+            "created_at": row["created_at"],
+            "questions": questions,
+        }
+
     def review_survey(
         self,
         survey_id: int,
@@ -1714,12 +1977,39 @@ class ResearchDatabase:
     ) -> dict[str, Any] | None:
         status = "approved" if approved else "rejected"
         with self._connection() as connection:
+            existing = self._fetchone(
+                connection,
+                "SELECT id, survey_name, status, created_by, tenant_id FROM wrapped_surveys WHERE id = ? AND deleted_at IS NULL",
+                (survey_id,),
+            )
+            if not existing:
+                return None
             self._execute(
                 connection,
-                "UPDATE wrapped_surveys SET moderation_status = ?, moderation_note = ?, reviewed_by = ?, reviewed_at = ? "
+                "UPDATE wrapped_surveys SET moderation_status = ?, moderation_note = ?, reviewed_by = ?, reviewed_at = ?, "
+                "status = CASE WHEN ? = 'rejected' AND status = 'collecting' THEN 'draft' ELSE status END "
                 "WHERE id = ?",
-                (status, note.strip()[:500], reviewer_id, self._now(), survey_id),
+                (status, note.strip()[:500], reviewer_id, self._now(), status, survey_id),
             )
+            if not approved:
+                user_id = existing.get("created_by")
+                if not user_id and existing.get("tenant_id"):
+                    owner = self._fetchone(
+                        connection,
+                        "SELECT id FROM admin_users WHERE tenant_id = ? AND role <> 'platform_admin' ORDER BY id LIMIT 1",
+                        (existing["tenant_id"],),
+                    )
+                    user_id = owner["id"] if owner else None
+                if user_id:
+                    message = f"《{existing['survey_name']}》不符合平台规定，已退回编辑。"
+                    if note.strip():
+                        message += f"原因：{note.strip()[:500]}"
+                    self._execute(
+                        connection,
+                        "INSERT INTO user_notifications "
+                        "(user_id, notification_type, title, content, survey_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                        (user_id, "survey_rejected", "问卷审核退回", message, survey_id, self._now()),
+                    )
         return self.get_survey(survey_id)
 
     def log_operation(

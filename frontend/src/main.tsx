@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import * as echarts from "echarts";
 import html2canvas from "html2canvas";
-import { BarChart3, BookOpen, CheckCircle2, Copy, Database, Download, ExternalLink, FileDown, FileSpreadsheet, FileText, KeyRound, LayoutDashboard, Link2, LoaderCircle, LockKeyhole, LogOut, Plus, QrCode, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
+import { BarChart3, BookOpen, CheckCircle2, Copy, Database, Download, ExternalLink, FileDown, FileSpreadsheet, FileText, KeyRound, LayoutDashboard, Link2, LoaderCircle, LockKeyhole, LogOut, Megaphone, Plus, QrCode, RotateCcw, Save, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
 import { adminDeleteJson, adminFetchJson, adminPostJson, postJson } from "./api/client";
 import { AnalyticsExtras } from "./components/AnalyticsExtras";
 import { ChartCard as SharedChartCard } from "./components/Charts";
@@ -11,12 +11,15 @@ import { QuestionEditor as SharedQuestionEditor } from "./components/QuestionEdi
 import { ResponseTable } from "./components/ResponseTable";
 import { SecurityPanel } from "./components/SecurityPanel";
 import { WrappedSurveyEditor } from "./components/WrappedSurveyEditor";
+import { NotificationPrompt } from "./components/NotificationPrompt";
 import { AdminPortalLayout } from "./pages/AdminPortal";
 import { ApiServicePage } from "./pages/ApiServicePage";
+import { AnnouncementHomePrompt, AnnouncementPage } from "./pages/AnnouncementPage";
 import { AuthPage } from "./pages/AuthPage";
 import { LandingPage } from "./pages/LandingPage";
 import { PlatformAuthPage } from "./pages/PlatformAuthPage";
 import { PlatformPortal } from "./pages/PlatformPortal";
+import { SiteInfoPage } from "./pages/SiteInfoPage";
 import { UserPortal as UserPortalPage } from "./pages/UserPortal";
 import { canManageTenant } from "./permissions";
 import "./styles.css";
@@ -102,7 +105,9 @@ function App() {
   const isPlatformLogin = pathname === "/platform/login" || pathname === "/platform-login";
   const isConsole = pathname === "/console" || pathname.startsWith("/console/");
   const isApiService = pathname === "/api-service" || pathname.startsWith("/api-service/");
+  const isAnnouncements = pathname === "/announcements" || pathname.startsWith("/announcements/");
   const isPlatform = pathname === "/platform" || pathname.startsWith("/platform/");
+  const siteInfoKind = getSiteInfoKind(pathname);
   function logout() { sessionStorage.removeItem("auth_token"); sessionStorage.removeItem("admin_token"); sessionStorage.removeItem("admin_role"); setAuthToken(""); setAuthRole("owner"); }
   function logoutPlatform() { sessionStorage.removeItem("platform_token"); sessionStorage.removeItem("platform_role"); sessionStorage.removeItem("auth_token"); sessionStorage.removeItem("admin_token"); sessionStorage.removeItem("admin_role"); setPlatformToken(""); setAuthToken(""); }
   function handleAuthenticated(data: { token: string; role?: string }) {
@@ -120,21 +125,22 @@ function App() {
     setPlatformToken(data.token);
     window.location.assign("/platform");
   }
-  const consoleNav = authToken && !shareToken && !isPlatform && <nav className="main-nav">
-    <button onClick={() => window.location.assign("/#product")}>产品</button>
-    <button onClick={() => window.location.assign("/#workflow")}>解决方案</button>
+  const consoleNav = authToken && !shareToken && !isPlatform && <nav className="main-nav landing-nav">
+    <button className={isHome ? "active" : ""} onClick={() => window.location.assign("/")}>首页</button>
+    <button className={isAnnouncements ? "active" : ""} onClick={() => window.location.assign("/announcements")}><Megaphone size={16} /> 公告</button>
     <button className={isApiService ? "active" : ""} onClick={() => window.location.assign("/api-service")}><KeyRound size={16} /> API 服务</button>
     <button className={isConsole ? "active" : ""} onClick={() => window.location.assign("/console")}><LayoutDashboard size={16} /> 控制台</button>
     <button className={isUserPortal ? "active" : ""} onClick={() => window.location.assign("/portal")}><Users size={16} /> 用户端</button>
     <button className="icon-button" onClick={logout} title="退出登录" aria-label="退出登录"><LogOut size={17} /></button>
   </nav>;
-  const platformNav = platformToken && isPlatform && <nav className="main-nav landing-nav">
-    <button className="active" onClick={() => window.location.assign("/platform")}><ShieldCheck size={16} /> 平台后台</button>
+  const platformNav = platformToken && (isPlatform || isAnnouncements) && <nav className="main-nav landing-nav">
+    <button className={isPlatform ? "active" : ""} onClick={() => window.location.assign("/platform")}><ShieldCheck size={16} /> 平台后台</button>
+    <button className={isAnnouncements ? "active" : ""} onClick={() => window.location.assign("/announcements")}><Megaphone size={16} /> 公告</button>
     <button className="icon-button" onClick={logoutPlatform} title="退出平台后台" aria-label="退出平台后台"><LogOut size={17} /></button>
   </nav>;
   const publicNav = !authToken && !platformToken && !shareToken && <nav className="main-nav landing-nav">
-    <button onClick={() => window.location.assign("/#product")}>产品</button>
-    <button onClick={() => window.location.assign("/#workflow")}>解决方案</button>
+    <button className={isHome ? "active" : ""} onClick={() => window.location.assign("/")}>首页</button>
+    <button className={isAnnouncements ? "active" : ""} onClick={() => window.location.assign("/announcements")}><Megaphone size={16} /> 公告</button>
     <button onClick={() => window.location.assign("/api-service")}>API 服务</button>
     <button onClick={() => window.location.assign("/platform/login")}>平台管理</button>
     <button onClick={() => window.location.assign("/login")}>登录</button>
@@ -142,11 +148,14 @@ function App() {
   </nav>;
   return <main className={`app-main ${isHome ? "marketing-main" : ""}`}>
     <header className="topbar"><button className="brand" onClick={() => window.location.assign("/")} aria-label="返回趣测智研首页"><img className="brand-mark" src="/brand-icon.png" alt="" /><span className="brand-name">趣测智研</span><span className="brand-subtitle">FUN RESEARCH</span></button>{platformNav || consoleNav || publicNav}</header>
+    {authToken && !isPlatform && <NotificationPrompt token={authToken} />}
     {shareToken ? <UserPortalPage shareToken={shareToken} renderResult={(result) => <ResultPanel result={result} />} /> :
-      isHome ? <LandingPage authenticated={Boolean(authToken)} /> :
+      isHome ? <><AnnouncementHomePrompt token={authToken || undefined} /><LandingPage authenticated={Boolean(authToken)} /></> :
+      siteInfoKind ? <SiteInfoPage kind={siteInfoKind} /> :
       isPlatformLogin ? <PlatformAuthPage onAuthenticated={handlePlatformAuthenticated} /> :
       isAuthPage ? <AuthPage mode={pathname === "/register" ? "register" : "login"} onAuthenticated={handleAuthenticated} /> :
       isApiService ? (authToken ? <ApiServicePage token={authToken} /> : <AuthPage mode="login" onAuthenticated={handleAuthenticated} />) :
+      isAnnouncements ? <AnnouncementPage token={platformToken || authToken || undefined} isPlatformAdmin={Boolean(platformToken)} /> :
       isPlatform ? (platformToken ? <PlatformPortal token={platformToken} /> : <PlatformAuthPage onAuthenticated={handlePlatformAuthenticated} />) :
       isUserPortal ? (authToken ? <UserPortalPage adminBrowse token={authToken} renderResult={(result) => <ResultPanel result={result} />} /> : <AuthPage mode="login" onAuthenticated={handleAuthenticated} />) :
       isConsole ? (authToken ? <AdminPortal token={authToken} role={authRole} onLogout={logout} /> : <AuthPage mode="login" onAuthenticated={handleAuthenticated} />) :
@@ -331,7 +340,9 @@ function AdminPortal({ token, role, onLogout }: { token: string; role: string; o
     try {
       const data = await adminFetchJson<{ items: SurveySummary[] }>("/api/surveys", token);
       setSurveys(data.items);
-      if (data.items.length && !selectedId) await selectSurvey(data.items[0].id);
+      const requestedId = Number(new URLSearchParams(window.location.search).get("survey_id"));
+      const requested = requestedId && data.items.some((item) => item.id === requestedId) ? requestedId : null;
+      if (data.items.length && !selectedId) await selectSurvey(requested || data.items[0].id);
     } catch (error) {
       setMessage(getErrorMessage(error));
     }
@@ -491,14 +502,14 @@ function AdminPortal({ token, role, onLogout }: { token: string; role: string; o
     <button className={active === "trash" ? "active" : ""} onClick={() => { setActive("trash"); void loadTrash(); }}><Trash2 size={17} /> 回收站 <span className="trash-count">{trashItems.length}</span></button>
     <div className="sidebar-divider" /><p>已保存问卷</p>
     {!surveys.length ? <span className="sidebar-empty">暂无已保存问卷</span> : surveys.map((item) => <button className={`sidebar-survey ${selectedId === item.id ? "selected" : ""}`} key={item.id} onClick={(event) => { const target = event.target as HTMLElement; if (target.closest("[data-delete-survey]")) { event.stopPropagation(); void moveToTrash(item); return; } void selectSurvey(item.id); }}>
-      <span>{item.theme}<em className={`survey-status ${item.status}`}>{statusLabel(item.status)}</em></span>
+      <span>{item.theme}<em className={`survey-status ${item.status}`}>{statusLabel(item.status, item.moderation_status)}</em></span>
       <strong>{item.survey_name}</strong>
       {canManage && <span data-delete-survey className="sidebar-delete-action" title="移入回收站" aria-label={`将${item.survey_name}移入回收站`}><Trash2 size={15} /></span>}
     </button>)}
   </aside><section className="admin-content">
     {message && <div className="notice">{message}</div>}
     {active === "create" ? <CreateWorkspace token={token} onCreated={onCreated} /> :
-      active === "editor" && survey && selectedId ? <WrappedSurveyEditor surveyId={selectedId} survey={survey} token={token} role={role} status={surveyStatus} onSaved={(nextSurvey) => { setSurvey(nextSurvey); setSelectedMeta((item) => item ? { ...item, survey_name: nextSurvey.survey_name, theme: nextSurvey.theme } : item); setSurveys((items) => items.map((item) => item.id === selectedId ? { ...item, survey_name: nextSurvey.survey_name, theme: nextSurvey.theme } : item)); }} /> :
+      active === "editor" && survey && selectedId ? <WrappedSurveyEditor surveyId={selectedId} survey={survey} token={token} role={role} status={surveyStatus} onSaved={(nextSurvey) => { setSurvey(nextSurvey); setSelectedMeta((item) => item ? { ...item, survey_name: nextSurvey.survey_name, theme: nextSurvey.theme, moderation_status: "pending", moderation_note: null } : item); setSurveys((items) => items.map((item) => item.id === selectedId ? { ...item, survey_name: nextSurvey.survey_name, theme: nextSurvey.theme, moderation_status: "pending", moderation_note: null } : item)); }} /> :
       active === "mapping" && survey ? <MappingView survey={survey} /> :
       active === "responses" ? <ResponseTable rows={responseRows} token={token} role={role} onChanged={(rows) => { setResponseRows(rows); if (selectedId) void selectSurvey(selectedId); }} /> :
       active === "analysis" && survey ? <AnalysisView survey={survey} summary={summary} analysis={analysis} status={surveyStatus} token={token} selectedId={selectedId} role={role} onArchived={handlePublicationSaved} /> :
@@ -534,7 +545,8 @@ function formatDate(value?: string | null) {
   if (!value) return "未知时间";
   return value.replace("T", " ");
 }
-function statusLabel(status: SurveyStatus) {
+function statusLabel(status: SurveyStatus, moderationStatus?: string) {
+  if (status === "draft" && moderationStatus === "rejected") return "编辑中";
   const labels: Record<SurveyStatus, string> = {
     draft: "草稿",
     collecting: "收集中",
@@ -854,6 +866,10 @@ function getShareTokenFromLocation() {
 }
 function getAdminUserPortalFromLocation() {
   return /^\/portal\/?$/.test(window.location.pathname);
+}
+function getSiteInfoKind(pathname: string): "docs" | "changelog" | "privacy" | "contact" | null {
+  const match = pathname.match(/^\/(docs|changelog|privacy|contact)\/?$/);
+  return (match?.[1] as "docs" | "changelog" | "privacy" | "contact" | undefined) || null;
 }
 function buildShareUrl(shareToken: string) {
   return `${window.location.origin}/share/${encodeURIComponent(shareToken)}`;

@@ -17,6 +17,9 @@
 | `generation_records` | 问卷解析、AI 包装和分析的 Token 调用记录 |
 | `token_requests` | 个人账号申请 Token 的记录 |
 | `platform_settings` | 平台级默认配置 |
+| `user_notifications` | 面向账号的审核和业务通知 |
+| `announcements` | 平台公告及发布状态 |
+| `announcement_reads` | 用户公告已读记录 |
 
 旧版本中的 `teams`、`team_members`、`team_invitations`、`survey_permissions` 已废弃。应用启动时会删除这些表，并删除 `wrapped_surveys.team_id` 等协作字段。
 
@@ -55,6 +58,12 @@
 - `analysis_payload`：问卷结束后生成的研究分析 JSON。
 - `deleted_at`：软删除时间，非空表示进入回收站。
 - `moderation_status`：`pending`、`approved` 或 `rejected`。
+
+### 公告与通知
+
+- `user_notifications` 只面向指定账号，用于问卷退回等私有业务提示。
+- `announcements` 保存草稿、已发布和已下线的全局公告。
+- `announcement_reads` 按用户记录公告已读状态，公告历史不会因已读而删除。
 
 问卷访问权限只由创建账号和所属个人工作区决定，不再存在成员授权。
 

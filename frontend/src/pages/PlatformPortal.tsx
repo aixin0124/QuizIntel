@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Check, CheckCircle2, Database, Gauge, Settings2, ShieldCheck, Users, X } from "lucide-react";
+import { Activity, BarChart3, Check, CheckCircle2, Database, Eye, Gauge, Settings2, ShieldCheck, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { adminFetchJson, adminPostJson } from "../api/client";
 import type { PlatformOverview, PlatformUser, TokenRequest } from "../types";
@@ -15,12 +15,27 @@ type ReviewItem = {
   created_by_name?: string | null;
 };
 
+type ReviewDetail = ReviewItem & {
+  questions: Array<{
+    index: number;
+    question_id: string;
+    public_text: string;
+    source_text: string;
+    question_type: string;
+    options: string[];
+    required: boolean;
+  }>;
+};
+
 export function PlatformPortal({ token }: { token: string }) {
   const [active, setActive] = useState<"overview" | "users" | "requests" | "reviews" | "settings">("overview");
   const [overview, setOverview] = useState<PlatformOverview | null>(null);
   const [users, setUsers] = useState<PlatformUser[]>([]);
   const [requests, setRequests] = useState<TokenRequest[]>([]);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [reviewDetail, setReviewDetail] = useState<ReviewDetail | null>(null);
+  const [rejectingId, setRejectingId] = useState<number | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
   const [settings, setSettings] = useState<Array<{ setting_key: string; setting_value: string; updated_at: string }>>([]);
   const [message, setMessage] = useState("");
 
@@ -55,17 +70,30 @@ export function PlatformPortal({ token }: { token: string }) {
     }
   }
 
-  async function reviewSurvey(id: number, approved: boolean) {
+  async function reviewSurvey(id: number, approved: boolean, note = "") {
     try {
-      await adminPostJson(`/api/platform/reviews/${id}`, { approved, note: approved ? "平台审核通过。" : "请补充内容说明后重新提交。" }, token);
+      await adminPostJson(`/api/platform/reviews/${id}`, { approved, note: approved ? "平台审核通过。" : note }, token);
       setMessage(approved ? "问卷内容已审核通过。" : "问卷内容已退回。");
+      setRejectingId(null);
+      setRejectNote("");
+      setReviewDetail(null);
       await load();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "内容审核失败。");
     }
   }
 
+  async function inspectReview(id: number) {
+    try {
+      const data = await adminFetchJson<{ item: ReviewDetail }>(`/api/platform/reviews/${id}`, token);
+      setReviewDetail(data.item);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "问卷详情读取失败。");
+    }
+  }
+
   async function toggleUser(user: PlatformUser) {
+    if (user.is_active && !window.confirm(`确定冻结账号“${user.display_name || user.username}”吗？冻结后该账号会立即退出所有已登录会话。`)) return;
     try {
       await adminPostJson(`/api/platform/users/${user.id}/status`, { is_active: !user.is_active }, token);
       setMessage(user.is_active ? "账号已冻结。" : "账号已恢复。");
@@ -91,10 +119,12 @@ export function PlatformPortal({ token }: { token: string }) {
           {active === "overview" && <PlatformOverviewView overview={overview} users={users} />}
           {active === "users" && <PlatformUsersView users={users} onToggle={toggleUser} />}
           {active === "requests" && <TokenRequestsView requests={requests} onReview={reviewToken} />}
-          {active === "reviews" && <ReviewView reviews={reviews} onReview={reviewSurvey} />}
+          {active === "reviews" && <ReviewView reviews={reviews} onReview={(id, approved) => approved ? void reviewSurvey(id, true) : setRejectingId(id)} onInspect={inspectReview} />}
           {active === "settings" && <SettingsView settings={settings} token={token} onSaved={load} />}
         </div>
       </div>
+      {reviewDetail && <ReviewDetailDialog detail={reviewDetail} onClose={() => setReviewDetail(null)} onApprove={() => void reviewSurvey(reviewDetail.id, true)} onReject={() => setRejectingId(reviewDetail.id)} />}
+      {rejectingId !== null && <RejectReviewDialog note={rejectNote} setNote={setRejectNote} onClose={() => { setRejectingId(null); setRejectNote(""); }} onConfirm={() => void reviewSurvey(rejectingId, false, rejectNote)} />}
     </section>
   );
 }
@@ -117,8 +147,16 @@ function TokenRequestsView({ requests, onReview }: { requests: TokenRequest[]; o
   return <section><div className="page-title"><div><p className="eyebrow">TOKEN REVIEW</p><h2>Token 额度审批</h2><p>审批通过后，额度会发放到申请人的个人工作区。</p></div><Database size={25} /></div><div className="platform-request-list">{!requests.length ? <div className="empty">暂无额度申请。</div> : requests.map((item) => <article key={item.id}><div><span>{item.tenant_name || "个人工作区"} · {item.requested_by_name || "未知用户"}</span><h3>{item.amount.toLocaleString()} Token</h3><p>{item.reason || "未填写用途说明"}</p></div><em className={`request-status ${item.status}`}>{requestStatusLabel(item.status)}</em>{item.status === "pending" && <div className="platform-row-actions"><button className="icon-button approve" onClick={() => onReview(item.id, true)} title="批准申请" aria-label="批准申请"><Check size={16} /></button><button className="icon-button reject" onClick={() => onReview(item.id, false)} title="驳回申请" aria-label="驳回申请"><X size={16} /></button></div>}</article>)}</div></section>;
 }
 
-function ReviewView({ reviews, onReview }: { reviews: ReviewItem[]; onReview: (id: number, approved: boolean) => void }) {
-  return <section><div className="page-title"><div><p className="eyebrow">CONTENT MODERATION</p><h2>内容审核</h2><p>平台管理员负责处理所有账号提交的问卷内容，保留审核状态和说明。</p></div><ShieldCheck size={25} /></div><div className="platform-review-list">{!reviews.length ? <div className="empty">暂无问卷记录。</div> : reviews.map((item) => <article key={item.id}><div className="review-main"><span>{item.workspace_name || "个人工作区"} · {item.created_by_name || "未知用户"}</span><h3>{item.survey_name}</h3><p>{item.theme}</p></div><em className={`review-status ${item.moderation_status}`}>{moderationStatusLabel(item.moderation_status)}</em><div className="platform-row-actions">{item.moderation_status !== "approved" && <button className="icon-button approve" onClick={() => onReview(item.id, true)} title="审核通过" aria-label="审核通过"><Check size={16} /></button>}{item.moderation_status !== "rejected" && <button className="icon-button reject" onClick={() => onReview(item.id, false)} title="退回问卷" aria-label="退回问卷"><X size={16} /></button>}</div></article>)}</div></section>;
+function ReviewView({ reviews, onReview, onInspect }: { reviews: ReviewItem[]; onReview: (id: number, approved: boolean) => void; onInspect: (id: number) => void }) {
+  return <section><div className="page-title"><div><p className="eyebrow">CONTENT MODERATION</p><h2>内容审核</h2><p>平台管理员负责处理所有账号提交的问卷内容，保留审核状态和说明。</p></div><ShieldCheck size={25} /></div><div className="platform-review-list">{!reviews.length ? <div className="empty">暂无问卷记录。</div> : reviews.map((item) => <article key={item.id}><div className="review-main"><span>{item.workspace_name || "个人工作区"} · {item.created_by_name || "未知用户"}</span><h3>{item.survey_name}</h3><p>{item.theme}</p>{item.moderation_note && <small className="review-note">退回原因：{item.moderation_note}</small>}</div><em className={`review-status ${item.moderation_status}`}>{moderationStatusLabel(item.moderation_status)}</em><div className="platform-row-actions"><button className="icon-button" onClick={() => onInspect(item.id)} title="查看具体题目" aria-label="查看具体题目"><Eye size={16} /></button>{item.moderation_status !== "approved" && <button className="icon-button approve" onClick={() => onReview(item.id, true)} title="审核通过" aria-label="审核通过"><Check size={16} /></button>}{item.moderation_status !== "rejected" && <button className="icon-button reject" onClick={() => onReview(item.id, false)} title="退回问卷" aria-label="退回问卷"><X size={16} /></button>}</div></article>)}</div></section>;
+}
+
+function ReviewDetailDialog({ detail, onClose, onApprove, onReject }: { detail: ReviewDetail; onClose: () => void; onApprove: () => void; onReject: () => void }) {
+  return <div className="modal-overlay" role="presentation"><div className="platform-review-dialog" role="dialog" aria-modal="true" aria-labelledby="review-detail-title"><div className="dialog-head"><div><p className="eyebrow">SURVEY CONTENT</p><h2 id="review-detail-title">{detail.survey_name}</h2><span>{detail.theme} · {detail.questions.length} 道题</span></div><button className="icon-button" onClick={onClose} title="关闭" aria-label="关闭"><X size={17} /></button></div><div className="review-question-list">{detail.questions.map((question) => <article key={question.question_id}><div className="review-question-meta"><b>{String(question.index).padStart(2, "0")}</b><span>{question.question_type} · {question.required ? "必答" : "选答"}</span></div><h3>{question.public_text}</h3>{question.source_text && <p className="review-source">原始题目：{question.source_text}</p>}{question.options.length > 0 && <ul>{question.options.map((option) => <li key={option}>{option}</li>)}</ul>}</article>)}</div><div className="dialog-actions"><button className="secondary" onClick={onClose}>关闭</button>{detail.moderation_status !== "approved" && <button className="primary" onClick={onApprove}><Check size={15} /> 通过审核</button>}{detail.moderation_status !== "rejected" && <button className="danger-action" onClick={onReject}><X size={15} /> 退回问卷</button>}</div></div></div>;
+}
+
+function RejectReviewDialog({ note, setNote, onClose, onConfirm }: { note: string; setNote: (value: string) => void; onClose: () => void; onConfirm: () => void }) {
+  return <div className="modal-overlay" role="presentation"><div className="platform-review-dialog compact" role="dialog" aria-modal="true" aria-labelledby="reject-review-title"><div className="dialog-head"><div><p className="eyebrow">RETURN SURVEY</p><h2 id="reject-review-title">填写退回原因</h2></div><button className="icon-button" onClick={onClose} title="关闭" aria-label="关闭"><X size={17} /></button></div><p>退回后，收集中的问卷会自动变为编辑中，并通知创建者。</p><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} rows={5} placeholder="请说明不符合平台规定的具体原因" /><div className="dialog-actions"><button className="secondary" onClick={onClose}>取消</button><button className="danger-action" onClick={onConfirm} disabled={!note.trim()}><X size={15} /> 确认退回</button></div></div></div>;
 }
 
 function SettingsView({ settings, token, onSaved }: { settings: Array<{ setting_key: string; setting_value: string; updated_at: string }>; token: string; onSaved: () => void }) {

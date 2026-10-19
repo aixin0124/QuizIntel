@@ -154,6 +154,37 @@ CREATE TABLE IF NOT EXISTS platform_settings (
     updated_at VARCHAR(32) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS user_notifications (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    notification_type VARCHAR(64) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    survey_id INT,
+    read_at VARCHAR(32),
+    created_at VARCHAR(32) NOT NULL,
+    INDEX idx_user_notifications_unread (user_id, read_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS announcements (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    content TEXT NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'draft',
+    published_at VARCHAR(32),
+    created_by INT NOT NULL,
+    created_at VARCHAR(32) NOT NULL,
+    updated_at VARCHAR(32) NOT NULL,
+    INDEX idx_announcements_status (status, published_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS announcement_reads (
+    announcement_id INT NOT NULL,
+    user_id INT NOT NULL,
+    read_at VARCHAR(32) NOT NULL,
+    PRIMARY KEY (announcement_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 INSERT IGNORE INTO schema_migrations (version, applied_at)
 VALUES (1, DATE_FORMAT(NOW(), '%Y-%m-%dT%H:%i:%s'));
 
