@@ -1,5 +1,5 @@
 import { ArrowRight, BarChart3, CheckCircle2, FileText, KeyRound, Play, ShieldCheck, Sparkles, Users } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent, type ReactNode } from "react";
 import { SiteFooter } from "../components/SiteFooter";
 
 type LandingPageProps = {
@@ -29,6 +29,7 @@ export function LandingPage({ authenticated }: LandingPageProps) {
   const [demoIndex, setDemoIndex] = useState(0);
   const [answers, setAnswers] = useState<number[]>([]);
   const [demoFinished, setDemoFinished] = useState(false);
+  const [revealReady, setRevealReady] = useState(true);
   const demoResult = useMemo(() => {
     if (!answers.length) return demoResults[0];
     const counts = answers.reduce((result, answer) => {
@@ -38,6 +39,19 @@ export function LandingPage({ authenticated }: LandingPageProps) {
     const strongest = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || "0";
     return demoResults[Number(strongest)];
   }, [answers]);
+
+  useEffect(() => {
+    if (!revealReady) return;
+    const elements = Array.from(document.querySelectorAll<HTMLElement>(".landing-page [data-reveal]"));
+    const observer = new IntersectionObserver((entries) => entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add("is-revealed");
+        observer.unobserve(entry.target);
+      }
+    }), { threshold: 0.12, rootMargin: "0px 0px -8%" });
+    elements.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [revealReady]);
 
   function go(path: string) {
     window.location.assign(path);
@@ -65,8 +79,8 @@ export function LandingPage({ authenticated }: LandingPageProps) {
   }
 
   return (
-    <div className="landing-page">
-      <section className="landing-hero">
+    <div className={`landing-page ${revealReady ? "reveal-ready" : ""}`}>
+      <section className="landing-hero" data-reveal>
         <div className="landing-hero-copy">
           <p className="eyebrow">FUN RESEARCH PLATFORM</p>
           <h1>把问卷，变成真正<span className="hero-accent-gradient">能被理解</span>的研究。</h1>
@@ -74,36 +88,60 @@ export function LandingPage({ authenticated }: LandingPageProps) {
           <div className="landing-actions"><button className="primary landing-primary" onClick={() => go(authenticated ? "/console" : "/register")}>{authenticated ? "进入控制台" : "免费创建个人账号"} <ArrowRight size={17} /></button><button className="landing-secondary-action" onClick={scrollToDemo}><Play size={16} /> 查看演示流程</button></div>
           <div className="landing-trust-row"><span><CheckCircle2 size={15} /> 个人空间隔离</span><span><CheckCircle2 size={15} /> Token 用量可追踪</span><span><CheckCircle2 size={15} /> 问卷数据可导出</span></div>
         </div>
+        <TiltPreview>
         <div className="landing-hero-visual" aria-label="趣测智研控制台预览">
           <div className="landing-visual-top"><div className="landing-visual-brand"><img src="/brand-icon.png" alt="" /><strong>趣测智研</strong></div><span className="landing-live-dot"><i /> 工作区在线</span></div>
           <div className="landing-visual-body"><div className="landing-visual-sidebar"><span className="visual-sidebar-active"><BarChart3 size={14} /> 数据总览</span><span><Sparkles size={14} /> AI 问卷</span><span><ShieldCheck size={14} /> 个人问卷</span><span><KeyRound size={14} /> API 服务</span></div><div className="landing-visual-dashboard"><div className="visual-dashboard-heading"><span>本月研究概览</span><strong>2026 / 09</strong></div><div className="visual-metric-row"><div><small>有效问卷</small><b>24</b><em>+18.4%</em></div><div><small>回收答卷</small><b>3,860</b><em>+26.1%</em></div><div><small>Token 余额</small><b>18.2k</b><em>可用</em></div></div><div className="visual-chart"><div className="visual-chart-head"><span>答卷回收趋势</span><small>近 30 天</small></div><div className="visual-bars">{[35, 52, 43, 62, 54, 76, 68, 86, 72, 92, 81, 100].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div></div><div className="visual-survey-list"><div><span className="visual-status green" /><strong>新品用户体验调研</strong><small>收集中 · 1,284 份</small></div><div><span className="visual-status blue" /><strong>秋季消费偏好研究</strong><small>已归档 · AI 已分析</small></div></div></div></div>
         </div>
+        </TiltPreview>
       </section>
 
-      <section className="landing-service-band"><div><strong>产品能力</strong><span>从导入到分析一站完成</span></div><div><strong>个人管理</strong><span>问卷数据按账号隔离</span></div><div><strong>开放 API</strong><span>Token 用量清晰可追踪</span></div><div><strong>运营治理</strong><span>平台管理员分层处理</span></div></section>
+      <section className="landing-service-band" data-reveal><div><strong>产品能力</strong><span>从导入到分析一站完成</span></div><div><strong>个人管理</strong><span>问卷数据按账号隔离</span></div><div><strong>开放 API</strong><span>Token 用量清晰可追踪</span></div><div><strong>运营治理</strong><span>平台管理员分层处理</span></div></section>
 
-      <section className="landing-section landing-capability-section" id="product">
+      <section className="landing-section landing-capability-section" id="product" data-reveal>
         <div className="landing-section-heading"><div><p className="eyebrow">PRODUCT CAPABILITIES</p><h2>从一个想法，到一份完整研究</h2></div><p>四个核心模块覆盖问卷研究的全流程，个人研究者也可以拥有接近专业团队的工作方式。</p></div>
-        <div className="landing-feature-grid landing-capability-grid">{capabilityCards.map((feature) => <article key={feature.title}><div className={`landing-feature-icon ${feature.className}`}>{feature.icon}</div><h3>{feature.title}</h3><p>{feature.description}</p><div className="landing-feature-detail">{feature.detail}</div></article>)}</div>
+        <div className="landing-feature-grid landing-capability-grid">{capabilityCards.map((feature) => <article data-reveal key={feature.title}><div className={`landing-feature-icon ${feature.className}`}>{feature.icon}</div><h3>{feature.title}</h3><p>{feature.description}</p><div className="landing-feature-detail">{feature.detail}</div></article>)}</div>
       </section>
 
-      <section className="landing-demo-section" id="try-demo">
+      <section className="landing-demo-section" id="try-demo" data-reveal>
         <div className="landing-section-heading demo-section-heading"><div><p className="eyebrow">TRY AN AI-WRAPPED SURVEY · 30 SECONDS</p><h2>亲手做一份 AI 包装过的问卷</h2></div><p>不用注册，直接体验受访者看到的界面。这里用项目实际的“互动题面、结果反馈和研究说明”做一个轻量演示，不会创建真实问卷，也不会消耗 Token。</p></div>
         <div className="landing-demo-layout">
-          <div className="demo-question-panel">
+          <div className="demo-question-panel" data-reveal>
             {!demoFinished ? <><div className="demo-progress-label"><span>第 {demoIndex + 1} 题 / {demoQuestions.length}</span><b>{Math.round(((demoIndex + 1) / demoQuestions.length) * 100)}%</b></div><div className="demo-progress"><span style={{ width: `${((demoIndex + 1) / demoQuestions.length) * 100}%` }} /></div><div className="demo-question-kicker">互动研究体验</div><h3>{demoQuestions[demoIndex].title}</h3><p className="demo-question-hint">{demoQuestions[demoIndex].hint}</p><div className="demo-options">{demoQuestions[demoIndex].options.map((option, index) => <button key={option} className={answers[demoIndex] === index ? "selected" : ""} onClick={() => chooseAnswer(index)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div><div className="demo-question-actions"><button onClick={() => setDemoIndex((index) => Math.max(0, index - 1))} disabled={demoIndex === 0}>上一题</button><span>选择后自动进入下一题</span></div></> : <DemoResult result={demoResult} onRestart={restartDemo} onStart={() => go(authenticated ? "/console" : "/register")} />}</div>
-          <div className="demo-explainer"><div className="demo-explainer-icon"><Sparkles size={23} /></div><h3>不只收集答案，而是理解答案背后的人。</h3><p>传统问卷让受访者疲劳，让研究者面对一堆干巴巴的选项。趣测智研用 AI 把题目变成更自然的互动表达，回收后再用统计和研究维度把数据变成可解释的洞察。</p><div className="demo-explainer-list"><div><span>🎯</span><div><strong>智能追问</strong><p>围绕研究目标组织题目，让每道题都能服务于后续分析。</p></div></div><div><span>⚡</span><div><strong>实时洞察</strong><p>回收过程中查看有效答卷、选项分布和答题完成情况。</p></div></div><div><span>🔒</span><div><strong>空间隔离</strong><p>每个账号拥有独立工作区，问卷和答卷按账号管理。</p></div></div></div></div>
+          <div className="demo-explainer" data-reveal><div className="demo-explainer-icon"><Sparkles size={23} /></div><h3>不只收集答案，而是理解答案背后的人。</h3><p>传统问卷让受访者疲劳，让研究者面对一堆干巴巴的选项。趣测智研用 AI 把题目变成更自然的互动表达，回收后再用统计和研究维度把数据变成可解释的洞察。</p><div className="demo-explainer-list"><div><span>🎯</span><div><strong>智能追问</strong><p>围绕研究目标组织题目，让每道题都能服务于后续分析。</p></div></div><div><span>⚡</span><div><strong>实时洞察</strong><p>回收过程中查看有效答卷、选项分布和答题完成情况。</p></div></div><div><span>🔒</span><div><strong>空间隔离</strong><p>每个账号拥有独立工作区，问卷和答卷按账号管理。</p></div></div></div></div>
         </div>
       </section>
 
-      <section className="landing-workflow"><div className="landing-section-heading"><div><p className="eyebrow">HOW IT WORKS</p><h2>三步，把研究推进到结果</h2></div><p>每一步都对应当前项目已经提供的页面和操作，不需要在多个工具之间来回切换。</p></div><div className="landing-steps"><article><span>01</span><div><h3>创建个人空间</h3><p>注册账号后，所有问卷默认归你管理，同时获得可追踪的 Token 额度。你可以在控制台看到自己的问卷和状态。</p></div></article><article><span>02</span><div><h3>生成并发布问卷</h3><p>导入题目，填写调研目标，调用 AI 生成互动包装，再检查题面、选项、研究标签和结果映射，确认后发布专属分享链接。</p></div></article><article><span>03</span><div><h3>查看研究结果</h3><p>发布后回收答卷，结束问卷后生成数据分析，查看选项统计、研究维度、关键发现和分析边界，并导出 Excel 或 PDF 报表。</p></div></article></div></section>
+      <section className="landing-workflow" data-reveal><div className="landing-section-heading"><div><p className="eyebrow">HOW IT WORKS</p><h2>三步，把研究推进到结果</h2></div><p>每一步都对应当前项目已经提供的页面和操作，不需要在多个工具之间来回切换。</p></div><div className="landing-steps"><article data-reveal><span>01</span><div><h3>创建个人空间</h3><p>注册账号后，所有问卷默认归你管理，同时获得可追踪的 Token 额度。你可以在控制台看到自己的问卷和状态。</p></div></article><article data-reveal><span>02</span><div><h3>生成并发布问卷</h3><p>导入题目，填写调研目标，调用 AI 生成互动包装，再检查题面、选项、研究标签和结果映射，确认后发布专属分享链接。</p></div></article><article data-reveal><span>03</span><div><h3>查看研究结果</h3><p>发布后回收答卷，结束问卷后生成数据分析，查看选项统计、研究维度、关键发现和分析边界，并导出 Excel 或 PDF 报表。</p></div></article></div></section>
 
-      <section className="landing-faq-section"><div className="landing-section-heading"><div><p className="eyebrow">FAQ</p><h2>你可能想问</h2></div><p>下面的说明按当前项目已有的账号、AI、分析和平台功能整理。</p></div><FaqItem question="个人研究者使用需要付费吗？" answer="当前项目不接入真实支付。注册后进入个人工作区，生成、解析和分析功能使用 Token 额度；额度不足时可以提交申请，由平台管理员审核发放。"/><FaqItem question="我的数据会被用于训练模型吗？" answer="项目当前的隐私边界是：AI 请求会将完成当前生成、解析或分析所需的研究内容发送给配置的模型服务。平台不会在页面中承诺将你的数据用于模型训练，建议不要提交与研究无关的敏感信息。"/><FaqItem question="AI 生成的问卷可以修改吗？" answer="可以。AI 生成结果先保存为草稿，研究者可以在互动问卷编辑器中调整题面、选项、研究标签和题目映射，确认后再发布。"/><FaqItem question="什么时候可以查看数据分析？" answer="问卷处于收集状态时先查看回收概况。结束问卷后样本数量锁定，管理员可以点击开始数据分析，系统再生成统计、维度和研究结论。"/><FaqItem question="API 有哪些可追踪信息？" answer="API 服务页会展示 Token 余额、累计已用、今日调用、调用次数、最近调用记录和额度申请记录。生成、解析和分析调用会记录用量，导出和查看不扣 Token。"/></section>
+      <section className="landing-faq-section" data-reveal><div className="landing-section-heading"><div><p className="eyebrow">FAQ</p><h2>你可能想问</h2></div><p>下面的说明按当前项目已有的账号、AI、分析和平台功能整理。</p></div><FaqItem question="个人研究者使用需要付费吗？" answer="当前项目不接入真实支付。注册后进入个人工作区，生成、解析和分析功能使用 Token 额度；额度不足时可以提交申请，由平台管理员审核发放。"/><FaqItem question="我的数据会被用于训练模型吗？" answer="项目当前的隐私边界是：AI 请求会将完成当前生成、解析或分析所需的研究内容发送给配置的模型服务。平台不会在页面中承诺将你的数据用于模型训练，建议不要提交与研究无关的敏感信息。"/><FaqItem question="AI 生成的问卷可以修改吗？" answer="可以。AI 生成结果先保存为草稿，研究者可以在互动问卷编辑器中调整题面、选项、研究标签和题目映射，确认后再发布。"/><FaqItem question="什么时候可以查看数据分析？" answer="问卷处于收集状态时先查看回收概况。结束问卷后样本数量锁定，管理员可以点击开始数据分析，系统再生成统计、维度和研究结论。"/><FaqItem question="API 有哪些可追踪信息？" answer="API 服务页会展示 Token 余额、累计已用、今日调用、调用次数、最近调用记录和额度申请记录。生成、解析和分析调用会记录用量，导出和查看不扣 Token。"/></section>
 
-      <section className="landing-cta"><div><p className="eyebrow">READY TO RESEARCH</p><h2>先建立一个属于你的研究空间。</h2><p>毕设阶段可以先用首页演示理解流程，再注册账号导入自己的问卷。平台保留 Token 申请、平台审核和研究结果导出的完整路径。</p></div><button className="primary" onClick={() => go(authenticated ? "/console" : "/register")}>开始使用 <ArrowRight size={17} /></button></section>
+      <section className="landing-cta" data-reveal><div><p className="eyebrow">READY TO RESEARCH</p><h2>先建立一个属于你的研究空间。</h2><p>毕设阶段可以先用首页演示理解流程，再注册账号导入自己的问卷。平台保留 Token 申请、平台审核和研究结果导出的完整路径。</p></div><button className="primary" onClick={() => go(authenticated ? "/console" : "/register")}>开始使用 <ArrowRight size={17} /></button></section>
       <SiteFooter />
     </div>
   );
+}
+
+function TiltPreview({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  function handleMove(event: PointerEvent<HTMLDivElement>) {
+    const element = ref.current;
+    if (!element || event.pointerType === "touch") return;
+    const bounds = element.getBoundingClientRect();
+    const x = (event.clientX - bounds.left) / bounds.width - 0.5;
+    const y = (event.clientY - bounds.top) / bounds.height - 0.5;
+    element.style.setProperty("--tilt-x", `${(-y * 7).toFixed(2)}deg`);
+    element.style.setProperty("--tilt-y", `${(x * 9).toFixed(2)}deg`);
+    element.style.setProperty("--tilt-scale", "1.015");
+  }
+  function reset() {
+    const element = ref.current;
+    if (!element) return;
+    element.style.setProperty("--tilt-x", "0deg");
+    element.style.setProperty("--tilt-y", "0deg");
+    element.style.setProperty("--tilt-scale", "1");
+  }
+  return <div className="landing-tilt-wrap" ref={ref} onPointerMove={handleMove} onPointerLeave={reset}>{children}</div>;
 }
 
 function DemoResult({ result, onRestart, onStart }: { result: typeof demoResults[number]; onRestart: () => void; onStart: () => void }) {

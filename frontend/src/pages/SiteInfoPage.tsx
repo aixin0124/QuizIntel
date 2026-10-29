@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, BookOpen, Clock3, FileText, Mail, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, BookOpen, Clock3, ExternalLink, FileText, Github, Mail, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fetchJson } from "../api/client";
 import { SiteFooter } from "../components/SiteFooter";
@@ -104,8 +104,8 @@ function ChangelogContent() {
     return () => { cancelled = true; };
   }, []);
   return <div className="changelog-list">
-    <div className="changelog-note"><FileText size={17} /><span>{loading ? "正在读取 GitHub 更新日志..." : live ? <>以下内容实时同步自 <a href={`https://github.com/${repository}`} target="_blank" rel="noreferrer">{repository}</a>。</> : "GitHub 暂时不可用，当前显示本地保留的项目更新记录。"}</span></div>
-    {items.map((item) => <article className="changelog-item" key={item.hash}><div className="changelog-date">{item.date}<code>{item.hash}</code></div><div><h2>{item.title}</h2><p>{item.detail || "该提交未附加详细说明。"}</p>{"url" in item && item.url && <a className="changelog-commit-link" href={item.url} target="_blank" rel="noreferrer">查看提交</a>}</div></article>)}
+    <div className="changelog-note"><FileText size={17} /><span>{loading ? "正在读取 GitHub 更新日志..." : live ? <>以下内容实时同步自 <a className="changelog-repository-link" href={`https://github.com/${repository}`} target="_blank" rel="noreferrer"><Github size={14} />{repository}<ExternalLink size={12} /></a>。</> : "GitHub 暂时不可用，当前显示本地保留的项目更新记录。"}</span></div>
+    {items.map((item) => <article className="changelog-item" key={item.hash}><div className="changelog-date">{item.date}<code>{item.hash}</code></div><div><h2>{item.title}</h2><p>{item.detail || "该提交未附加详细说明。"}</p>{"url" in item && item.url && <a className="changelog-commit-link" href={item.url} target="_blank" rel="noreferrer">在 GitHub 查看 <ExternalLink size={13} /></a>}</div></article>)}
   </div>;
 }
 
