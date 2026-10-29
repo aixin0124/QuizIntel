@@ -671,35 +671,9 @@ def _generate_staged_survey(
         except RuntimeError as exc:
             raise RuntimeError(f"互动题补生成阶段失败：{exc}") from exc
 
-    title_result: dict[str, Any] = {}
-    try:
-        title_result = service.generate_json(
-            _title_system_prompt(),
-            json.dumps(
-                {
-                    "brand_goal": brand_goal,
-                    "theme_hint": theme_hint,
-                    "packaged_survey": {
-                        "theme": blueprint.get("theme"),
-                        "tagline": blueprint.get("tagline"),
-                        "intro": blueprint.get("intro"),
-                        "analysis_method": blueprint.get("analysis_method"),
-                        "dimensions": dimensions,
-                        "result_types": blueprint.get("result_types", []),
-                        "questions": question_result.get("questions", []),
-                    },
-                    "required_output": _title_schema(),
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-        )
-    except RuntimeError:
-        title_result = {}
-
     return {
-        "survey_name": title_result.get("survey_name") or blueprint.get("survey_name"),
-        "title_source": "finished_survey" if title_result.get("survey_name") else "",
+        "survey_name": _clean_theme_hint(theme_hint),
+        "title_source": "theme_input",
         "theme": blueprint.get("theme"),
         "tagline": blueprint.get("tagline"),
         "intro": blueprint.get("intro"),
@@ -801,7 +775,7 @@ def _blueprint_system_prompt() -> str:
     return (
         "你是专业的主题测评策划师。请先为用户指定主题建立一个通用、非临床的分析蓝图，"
         "不要复述原始问卷。根据主题选择 3 至 5 个真正相关的行为维度，并生成 4 个互相区分的结果画像。"
-        "theme 必须与 theme_hint 保持一致；survey_name 只是标题草案，不能简单写成“主题 + 测评/测试/问卷”。"
+        "theme 必须与 theme_hint 保持一致。问卷名称由系统直接使用用户填写的主题，不需要生成标题。"
         "原始题目只作为市场研究参考。只输出合法 JSON。"
         "dimensions 的每个字段保持简短；result_types 必须恰好 4 个，且每个都必须有"
         "覆盖全部 dimension key 的 dimension_profile，取值 -1 到 1；4 个画像的维度坐标"
@@ -811,9 +785,8 @@ def _blueprint_system_prompt() -> str:
         "心理活动、行为惯性和具体情境中的取舍；strengths 和 watchouts 各 1 至 2 条，"
         "advice 不超过 50 字。"
         "如果结果是动物、星座、职业或角色，具体结果名称只保留在 result_types 中，"
-        "不要放进 survey_name、theme、tagline、intro 或 analysis_method；"
+        "不要放进 theme、tagline、intro 或 analysis_method；"
         "用户应当在答题时无法直接猜出结果类别。"
-        "不要使用“你最像什么”“测测你是哪一类”这类直接暴露结果形式的标题。"
     )
 
 
@@ -830,18 +803,6 @@ def _question_system_prompt() -> str:
         "直接暴露测量意图的问法。"
         "各选项要同样自然、没有明显正确答案，避免一眼看出哪个选项对应哪个维度。"
         "只输出合法 JSON，不要 Markdown。"
-    )
-
-
-def _title_system_prompt() -> str:
-    return (
-        "你是互动测评的命名编辑。请根据已经包装完成的问卷内容生成最终标题。"
-        "标题要总结题面场景、分析维度、结果画像和副标题呈现出的整体体验，"
-        "而不是机械复述 theme_hint。"
-        "要求：1. 8 到 18 个中文字符左右；2. 自然、有记忆点，适合作为答题页主标题；"
-        "3. 保持主题相关，但不要简单写成“主题 + 测评/测试/问卷”；"
-        "4. 不要提前泄露具体结果类型，不要出现动物、星座、职业或角色等结果名称；"
-        "5. 只输出合法 JSON。"
     )
 
 
@@ -895,7 +856,6 @@ def _output_schema() -> dict[str, Any]:
 
 def _blueprint_schema() -> dict[str, Any]:
     return {
-        "survey_name": "测评名称",
         "theme": "主题名称",
         "tagline": "一句吸引人的副标题",
         "intro": "测评介绍",
@@ -942,10 +902,6 @@ def _question_schema() -> dict[str, Any]:
             }
         ]
     }
-
-
-def _title_schema() -> dict[str, Any]:
-    return {"survey_name": "根据成品问卷总结出的最终标题"}
 
 
 def _normalize_wrapped_survey(
@@ -1123,9 +1079,11 @@ def _resolve_survey_title(
     result_types: list[dict[str, Any]],
     dimensions: list[dict[str, Any]],
 ) -> str:
-    """优先使用成品问卷标题，退化时再根据内容兜底命名。"""
+    """按标题来源选择主题输入或成品标题。"""
 
     theme = _clean_theme_hint(theme_hint)
+    if raw.get("title_source") == "theme_input":
+        return theme
     raw_title = _clean_title(raw.get("survey_name", ""))
     trusted_finished_title = raw.get("title_source") == "finished_survey"
     if _is_usable_survey_title(raw_title, theme, trusted_finished_title):

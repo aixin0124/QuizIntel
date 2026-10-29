@@ -23,7 +23,9 @@ from backend.services.analytics_service import (
 from backend.storage.database import ResearchDatabase
 from backend.services.survey_service import (
     MIN_GENERATED_QUESTIONS,
+    _generate_staged_survey,
     _normalize_wrapped_survey,
+    _resolve_survey_title,
     _validate_wenjuan_url,
     _validate_wjx_url,
     build_wrapped_survey,
@@ -176,6 +178,31 @@ def test_wrap_title_summarizes_packaged_survey() -> None:
     assert survey.theme == "周末旅行决策风格"
     assert survey.survey_name == "周末旅行里的选择剧本"
     assert survey.survey_name != "周末旅行决策风格测评"
+
+
+def test_staged_generation_uses_theme_as_title_without_extra_llm_call() -> None:
+    class StagedLLMService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def generate_json(self, system_prompt: str, user_prompt: str) -> dict:
+            self.calls += 1
+            if self.calls == 1:
+                return {"dimensions": [{"key": "choice", "name": "选择倾向"}]}
+            return {"questions": [{"public_text": f"场景题目 {index}"} for index in range(12)]}
+
+    service = StagedLLMService()
+    result = _generate_staged_survey(
+        service,
+        [SurveyQuestion("q1", "你如何选择？", options=["A", "B"])],
+        "了解选择偏好",
+        "周末旅行决策风格",
+    )
+
+    assert service.calls == 2
+    assert result["survey_name"] == "周末旅行决策风格"
+    assert result["title_source"] == "theme_input"
+    assert _resolve_survey_title(result, "周末旅行决策风格", [], [], []) == "周末旅行决策风格"
 
 
 def test_finished_survey_title_is_kept_when_not_simple_theme_suffix() -> None:
