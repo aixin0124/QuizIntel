@@ -82,6 +82,7 @@ class Settings:
     )
     request_timeout: int = int(os.getenv("REQUEST_TIMEOUT", "120"))
     frontend_origin: str = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+    github_repository: str = os.getenv("GITHUB_REPOSITORY", "aixin0124/QuizIntel").strip()
 
     @property
     def has_llm(self) -> bool:

@@ -43,6 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 database = ResearchDatabase(settings.database_url)
+_github_changelog_cache: dict[str, Any] = {"expires_at": 0.0, "items": []}
 
 
 class ParseRequest(BaseModel):
@@ -221,6 +222,52 @@ def get_headlines() -> Any:
             content={"data": response.text},
             headers={"Cache-Control": "no-store"},
         )
+
+
+@app.get("/api/changelog")
+def get_changelog() -> dict[str, Any]:
+    """读取公开 GitHub 仓库提交，短时间缓存以避免触发 API 限流。"""
+
+    now = time.time()
+    if _github_changelog_cache["expires_at"] > now and _github_changelog_cache["items"]:
+        return {"repository": settings.github_repository, "items": _github_changelog_cache["items"], "source": "github"}
+    if not settings.github_repository or "/" not in settings.github_repository:
+        raise HTTPException(status_code=503, detail="GitHub 仓库配置无效。")
+    url = f"https://api.github.com/repos/{settings.github_repository}/commits"
+    try:
+        response = requests.get(
+            url,
+            params={"per_page": 20},
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "FunResearch/1.0"},
+            timeout=8,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"GitHub 更新日志暂时不可用：{exc}") from exc
+    if not isinstance(payload, list):
+        raise HTTPException(status_code=502, detail="GitHub 返回的提交记录格式无效。")
+    items = []
+    for commit in payload:
+        if not isinstance(commit, dict) or not isinstance(commit.get("commit"), dict):
+            continue
+        detail = commit["commit"]
+        author = detail.get("author") or {}
+        message = str(detail.get("message") or "").strip()
+        if not message:
+            continue
+        items.append(
+            {
+                "hash": str(commit.get("sha") or "")[:7],
+                "date": str(author.get("date") or "")[:10],
+                "title": message.splitlines()[0][:120],
+                "detail": "\n".join(message.splitlines()[1:]).strip()[:500],
+                "url": commit.get("html_url"),
+                "author": str((detail.get("author") or {}).get("name") or "未知作者"),
+            }
+        )
+    _github_changelog_cache.update({"expires_at": now + 300, "items": items})
+    return {"repository": settings.github_repository, "items": items, "source": "github"}
 
 
 @app.post("/api/admin/login")

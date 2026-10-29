@@ -1,4 +1,6 @@
 import { ArrowLeft, ArrowRight, BookOpen, Clock3, FileText, Mail, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { fetchJson } from "../api/client";
 import { SiteFooter } from "../components/SiteFooter";
 
 type SiteInfoKind = "docs" | "changelog" | "privacy" | "contact";
@@ -15,6 +17,7 @@ const changelogItems = [
   { hash: "154fbf4", date: "2026-09-20", title: "新增人格解析图片导出", detail: "结果页面支持将人格解析内容导出为图片，方便保存和提交研究材料。" },
   { hash: "ead917e", date: "2026-09-18", title: "V2.0 研究工作流升级", detail: "新增管理员账号体系、问卷发布与采集控制、问卷生命周期、数据分析、AI 生成质量控制和后台安全能力。" },
 ];
+type ChangelogItem = (typeof changelogItems)[number] & { url?: string | null; author?: string };
 
 export function SiteInfoPage({ kind }: SiteInfoPageProps) {
   const content = {
@@ -83,9 +86,26 @@ function DocBlock({ number, title, detail }: { number: string; title: string; de
 }
 
 function ChangelogContent() {
+  const [items, setItems] = useState<ChangelogItem[]>(changelogItems);
+  const [repository, setRepository] = useState("aixin0124/QuizIntel");
+  const [live, setLive] = useState(false);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchJson<{ repository: string; items: ChangelogItem[] }>("/api/changelog")
+      .then((data) => {
+        if (cancelled || !data.items.length) return;
+        setItems(data.items);
+        setRepository(data.repository);
+        setLive(true);
+      })
+      .catch(() => undefined)
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
   return <div className="changelog-list">
-    <div className="changelog-note"><FileText size={17} /><span>以下内容根据当前仓库在 2026 年 9 月的 Git 提交记录整理，提交短哈希可用于回到对应版本核对。</span></div>
-    {changelogItems.map((item) => <article className="changelog-item" key={item.hash}><div className="changelog-date">{item.date}<code>{item.hash}</code></div><div><h2>{item.title}</h2><p>{item.detail}</p></div></article>)}
+    <div className="changelog-note"><FileText size={17} /><span>{loading ? "正在读取 GitHub 更新日志..." : live ? <>以下内容实时同步自 <a href={`https://github.com/${repository}`} target="_blank" rel="noreferrer">{repository}</a>。</> : "GitHub 暂时不可用，当前显示本地保留的项目更新记录。"}</span></div>
+    {items.map((item) => <article className="changelog-item" key={item.hash}><div className="changelog-date">{item.date}<code>{item.hash}</code></div><div><h2>{item.title}</h2><p>{item.detail || "该提交未附加详细说明。"}</p>{"url" in item && item.url && <a className="changelog-commit-link" href={item.url} target="_blank" rel="noreferrer">查看提交</a>}</div></article>)}
   </div>;
 }
 
