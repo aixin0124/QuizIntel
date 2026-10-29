@@ -5,6 +5,29 @@ import type { Announcement } from "../types";
 
 type AnnouncementPageProps = { token?: string; isPlatformAdmin?: boolean };
 
+const guestAnnouncementReadStorageKey = "fun_research_read_announcements";
+
+function getGuestAnnouncementReads(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(guestAnnouncementReadStorageKey);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) return Object.fromEntries(parsed.map((id) => [String(id), "legacy"]));
+    if (parsed && typeof parsed === "object") return parsed as Record<string, string>;
+  } catch {
+    localStorage.removeItem(guestAnnouncementReadStorageKey);
+  }
+  return {};
+}
+
+function saveGuestAnnouncementReads(reads: Record<string, string>) {
+  localStorage.setItem(guestAnnouncementReadStorageKey, JSON.stringify(reads));
+}
+
+function guestAnnouncementVersion(item: Announcement) {
+  return item.updated_at || item.published_at || item.created_at;
+}
+
 export function AnnouncementPage({ token, isPlatformAdmin = false }: AnnouncementPageProps) {
   const [items, setItems] = useState<Announcement[]>([]);
   const [selected, setSelected] = useState<Announcement | null>(null);
@@ -29,9 +52,9 @@ export function AnnouncementPage({ token, isPlatformAdmin = false }: Announcemen
 
   async function markAllRead() {
     if (!token) {
-      const ids = new Set<number>(JSON.parse(localStorage.getItem("fun_research_read_announcements") || "[]"));
-      items.forEach((item) => ids.add(item.id));
-      localStorage.setItem("fun_research_read_announcements", JSON.stringify([...ids]));
+      const reads = getGuestAnnouncementReads();
+      items.forEach((item) => { reads[String(item.id)] = guestAnnouncementVersion(item); });
+      saveGuestAnnouncementReads(reads);
       setItems((current) => current.map((item) => ({ ...item, is_read: true })));
       return;
     }
@@ -108,8 +131,8 @@ export function AnnouncementHomePrompt({ token }: { token?: string }) {
     void fetchJson<{ items: Announcement[] }>("/api/announcements", token ? { headers: { "X-Admin-Token": token } } : undefined)
       .then((data) => {
         if (cancelled) return;
-        const localRead = new Set<number>(JSON.parse(localStorage.getItem("fun_research_read_announcements") || "[]"));
-        const unread = data.items.filter((item) => !item.is_read && (token || !localRead.has(item.id)));
+        const localRead = getGuestAnnouncementReads();
+        const unread = data.items.filter((item) => !item.is_read && (token || localRead[String(item.id)] !== guestAnnouncementVersion(item)));
         setItems(unread);
         setVisible(unread.length > 0);
       })
@@ -120,9 +143,9 @@ export function AnnouncementHomePrompt({ token }: { token?: string }) {
   async function confirm() {
     if (token) await adminPostJson("/api/announcements/read-all", {}, token).catch(() => undefined);
     else {
-      const ids = new Set<number>(JSON.parse(localStorage.getItem("fun_research_read_announcements") || "[]"));
-      items.forEach((item) => ids.add(item.id));
-      localStorage.setItem("fun_research_read_announcements", JSON.stringify([...ids]));
+      const reads = getGuestAnnouncementReads();
+      items.forEach((item) => { reads[String(item.id)] = guestAnnouncementVersion(item); });
+      saveGuestAnnouncementReads(reads);
     }
     setVisible(false);
   }
